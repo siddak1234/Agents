@@ -1,0 +1,45 @@
+# Repository-root ignores.
+#
+# Keep this file about things that are true for *every* agent — OS cruft,
+# editor state, secrets, and language caches that any agent folder might
+# produce. Agent-specific ignores belong in that agent's own .gitignore
+# (e.g. realty-lead-gen/.gitignore), so an agent folder stays correct if it
+# is ever extracted and used on its own.
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets. Never commit a real .env — commit .env.example instead.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node (for agents that end up being JS/TS)
+node_modules/
+
+# Scratch space
+tmp/
+_to_delete/

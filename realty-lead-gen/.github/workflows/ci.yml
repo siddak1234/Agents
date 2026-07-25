@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-unit:
+    name: lint + unit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Sync
+        run: uv sync --all-extras --frozen
+      # `scripts` is in scope here for the same reason `src` is: it holds
+      # `measure_surface.py`, which is where ARCHITECTURE.md's numbers come
+      # from. A type error that quietly changes what it reports would not
+      # break anything a user sees, which is exactly why CI has to catch it.
+      - name: Ruff format check
+        run: uv run ruff format --check src tests scripts
+      - name: Ruff lint
+        run: uv run ruff check src tests scripts
+      - name: Mypy
+        run: uv run mypy src scripts
+      # `--cov-fail-under=0` on purpose. The coverage gate is enforced once,
+      # in the `coverage` job below, over the *combined* unit + integration
+      # data. Enforcing it here too would fail the build for code that the
+      # integration job covers but this job cannot reach.
+      - name: Unit tests
+        run: uv run pytest -m unit --cov --cov-report= --cov-fail-under=0
+        env:
+          COVERAGE_FILE: .coverage.unit
+      - name: Upload unit coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: .coverage.unit
+          include-hidden-files: true
+          if-no-files-found: error
+
+  integration:
+    name: integration (postgres + redis)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: rlg
+          POSTGRES_PASSWORD: rlg
+          POSTGRES_DB: rlg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rlg -d rlg"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://rlg:rlg@localhost:5432/rlg
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --frozen
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+      - name: Integration tests
+        run: uv run pytest -m integration --cov --cov-report= --cov-fail-under=0
+        env:
+          COVERAGE_FILE: .coverage.integration
+      - name: Upload integration coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: .coverage.integration
+          include-hidden-files: true
+          if-no-files-found: error
+
+  coverage:
+    name: coverage gate
+    runs-on: ubuntu-24.04
+    needs: [lint-and-unit, integration]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --frozen
+      - name: Download coverage data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      # The two jobs measure disjoint halves of the codebase: the unit job
+      # never reaches a route handler, the integration job never reaches a
+      # scorer's edge cases. Judging either half against a whole-repo
+      # threshold measures the split, not the tests. `coverage combine`
+      # unions the arcs first; `--fail-under` then reads `fail_under` from
+      # pyproject.toml, so the number lives in exactly one place.
+      - name: Combine and enforce
+        run: |
+          uv run coverage combine
+          uv run coverage report
+          uv run coverage xml
+      - name: Upload coverage XML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error

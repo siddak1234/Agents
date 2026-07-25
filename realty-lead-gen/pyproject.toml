@@ -1,0 +1,305 @@
+[project]
+name = "realty-lead-gen"
+version = "0.1.0"
+description = "Agentic real-estate lead generation backend — ingest, enrich, score, persist."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "Realty Lead Gen" }]
+
+# Runtime dependencies. Pinned to conservative floors that match the
+# feature set we actually use; upper-bounded only where an API break is
+# expected in the next major.
+dependencies = [
+    # HTTP framework — FastAPI on Starlette on Uvicorn. Async-first, OpenAPI-first.
+    "fastapi[standard]>=0.115",
+    "uvicorn[standard]>=0.32",
+    "starlette>=0.41",
+    # Data validation & settings
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "email-validator>=2.2",
+    # DB — SQLAlchemy 2.x async ORM + Alembic migrations + asyncpg driver + PostGIS.
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14",
+    "asyncpg>=0.30",
+    "geoalchemy2>=0.16",
+    # Background jobs — arq (redis-backed, asyncio-native). Chosen over celery for
+    # asyncio ergonomics and over Temporal because we do not yet need durable
+    # workflows at Temporal's operational cost.
+    "arq>=0.26",
+    "redis>=5.2",
+    # LLM providers — Anthropic Claude for reasoning/vision. OpenAI kept behind
+    # a feature flag as a fallback provider (see agents.claude_client).
+    "anthropic>=0.42",
+    # HTTP client — httpx w/ retries via tenacity.
+    "httpx>=0.28",
+    "tenacity>=9.0",
+    # Structured logging + observability
+    "structlog>=24.4",
+    "opentelemetry-api>=1.29",
+    "opentelemetry-sdk>=1.29",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.50b0",
+    # Auth — asymmetric JWT verify (the frontend / Snoopy will mint tokens;
+    # we only verify). python-jose replaced by PyJWT (maintained).
+    "pyjwt[crypto]>=2.10",
+    # Address normalization — usaddress is the pragmatic choice; we produce a
+    # deterministic hash from the parsed components (see utils.addr).
+    "usaddress>=0.5.13",
+    "rapidfuzz>=3.10",  # fuzzy matching for dedup fallback
+    # Perceptual hashing for photo dedup / cache
+    "imagehash>=4.3",
+    "pillow>=11.0",
+    # Rate limiting for API. `limits` directly, not the `slowapi` wrapper:
+    # slowapi's hit path is synchronous (blocking Redis I/O on the event loop)
+    # and its key function cannot see the authenticated subject. See
+    # api/ratelimit.py for the full rationale. The `redis` dependency above
+    # doubles as the async storage driver.
+    "limits>=5.0",
+    # Money — use decimal directly + a currency helper via babel.
+    "babel>=2.16",
+    # OpenAPI extras
+    "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "pytest-httpx>=0.35",
+    "hypothesis>=6.122",
+    "testcontainers[postgres,redis]>=4.9",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-redis",
+    "pre-commit>=4.0",
+]
+
+scraping = [
+    # Playwright is optional and heavy — only pulled in for the ingestion worker
+    # that scrapes portals. API + main worker do not require it.
+    "playwright>=1.49",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.3",
+]
+
+[project.scripts]
+rlg-api = "realty_lead_gen.main:run"
+rlg-worker = "realty_lead_gen.worker:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/realty_lead_gen"]
+
+# --- Ruff --------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Selection rationale: E/W (pycodestyle), F (pyflakes), I (isort), UP (pyupgrade),
+# B (bugbear), SIM (simplify), TCH (type-checking imports), N (pep8-naming),
+# RUF (ruff-specific), S (bandit — security), ASYNC, DTZ (datetime tz), PL,
+# TRY (exception antipatterns), PERF, LOG.
+select = [
+    "E", "W", "F", "I", "UP", "B", "SIM", "TCH", "N", "RUF",
+    "S", "ASYNC", "DTZ", "PL", "TRY", "PERF", "LOG",
+]
+ignore = [
+    "E501",   # line length handled by formatter
+    "PLR0913",# too many arguments — a domain reality here
+    "TRY003", # long exception messages — we want them for observability
+    "S101",   # asserts in tests are fine
+]
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)`/`Security(...)` in a parameter default is not the mutable-
+# default bug B008 exists to catch — it is how FastAPI declares a dependency,
+# and the object it builds is an immutable marker the framework reads at
+# route-registration time. Without this, every dependency-injected endpoint
+# in the codebase carries a `# noqa: B008`, which trains us to skim.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.params.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Body",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.flake8-type-checking]
+# TC001/TC002/TC003 want every typing-only import under `if TYPE_CHECKING:`.
+# That is correct for ordinary code and actively breaks three frameworks we
+# rely on, all of which read `__annotations__` back at *runtime*:
+#
+#   * SQLAlchemy resolves `Mapped[uuid.UUID]` when the declarative class is
+#     created, so a deferred `uuid` import raises at import time, not later.
+#   * Pydantic resolves field annotations when the model class is built.
+#   * FastAPI resolves route signatures at route-registration time to build
+#     the dependency graph and the OpenAPI schema.
+#
+# Listing the base classes teaches ruff the difference instead of us
+# suppressing the rule per file and losing it everywhere it *is* right.
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "sqlalchemy.orm.DeclarativeBase",
+    "realty_lead_gen.models.base.Base",
+]
+# Route decorators. Ruff resolves `@router.get` back to `fastapi.APIRouter.get`
+# through the local binding, so listing the methods is enough — verified by
+# adding/removing this list against a route that takes a `uuid.UUID` path
+# parameter. Only the three verbs the API actually uses are listed; add a verb
+# here at the same time you add its first route.
+#
+# `@dataclass` bodies are not evaluated by the stdlib, but ours are read by
+# Pydantic's `TypeAdapter` in the scoring layer, and the cost of keeping the
+# import eager is nil.
+runtime-evaluated-decorators = [
+    "fastapi.APIRouter.get",
+    "fastapi.APIRouter.post",
+    "fastapi.APIRouter.delete",
+    "dataclasses.dataclass",
+    "pydantic.dataclasses.dataclass",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "PLR2004", "ASYNC"]
+"alembic/**" = ["N999"]
+# Revision scripts are machine-generated by `alembic revision --autogenerate`
+# and then formatted by the post-write hook. Their shape is not ours to
+# choose: a 19-table bootstrap is necessarily one long function (PLR0915),
+# and `Sequence` is used in a runtime-evaluated annotation on the module-level
+# `down_revision` so it cannot move into a type-checking block (TC003).
+# Ignoring here keeps `ruff check` meaningful everywhere else instead of
+# training us to skim its output.
+"alembic/versions/**" = ["N999", "PLR0915", "TC003"]
+# TC004 says "this import is used for more than type hinting, move it out of
+# the type-checking block". For a `relationship()` target that is wrong, and
+# obeying it would not compile: `Property` imports `Listing` and `Listing`
+# imports `Property`, so a runtime import is a genuine cycle — which is why
+# they are deferred in the first place. SQLAlchemy does not need the name in
+# module scope: it resolves a relationship's annotation against its own class
+# registry, keyed on the mapped class name. Verified by importing every model
+# module and calling `sqlalchemy.orm.configure_mappers()`, which forces every
+# relationship to resolve — all six on `Property` bind to the right class.
+# Scoped to the models package so TC004 still guards ordinary modules.
+"src/realty_lead_gen/models/**" = ["TC004"]
+# PLW0603 ("don't use `global`") is right almost everywhere and wrong for
+# exactly this file. `db.py` owns two lazy process-wide singletons — the
+# async engine and its sessionmaker — and both properties are load-bearing:
+#
+#   * *Process-wide*, because the whole point of a connection pool is that
+#     `pool_size` is a true bound on sockets against Postgres. Handing each
+#     caller its own engine turns `pool_size=10` into 10 × workers.
+#   * *Lazy*, because building it at import time would open sockets just for
+#     importing the package — which `alembic`, `--version`, and every unit
+#     test that never touches a database all do.
+#
+# The alternatives cost more than they save: a module-level mutable holder
+# object is the same global with an extra indirection and the same aliasing
+# hazard, and threading an engine through every call site turns a runtime
+# detail into part of every signature. `dispose_engine()` resets both back to
+# `None`, which is what makes the pattern testable — a test can tear the pool
+# down and rebuild it against a different DSN. Scoped to the one file so
+# `global` anywhere else still fails the build.
+"src/realty_lead_gen/db.py" = ["PLW0603"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# --- mypy --------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+namespace_packages = true
+explicit_package_bases = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = ["usaddress.*", "imagehash.*", "arq.*", "geoalchemy2.*"]
+ignore_missing_imports = true
+
+# --- pytest ------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config --tb=short"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: fast unit tests, no I/O",
+    "integration: touches Postgres/Redis via testcontainers",
+    "golden: LLM prompt golden-file tests (skipped by default; needs ANTHROPIC_API_KEY)",
+    "external: hits a real external API (skipped by default)",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:pkg_resources.*",
+]
+
+[tool.coverage.run]
+source = ["src/realty_lead_gen"]
+branch = true
+omit = ["*/alembic/*", "*/__main__.py"]
+# CI measures coverage in two jobs (unit, then integration-with-Postgres) and
+# combines the results. `parallel` makes each run write its own data file so
+# the second cannot clobber the first. A single local `pytest --cov` is
+# unaffected: pytest-cov combines within the invocation before reporting.
+parallel = true
+# Not optional, and not a performance knob. Without it, every statement in an
+# `async def` request handler *after* its first `await session.execute(...)` is
+# reported as never executed — a measurement artifact, not dead code.
+# `api/routes/leads.py` read 29.06% with 25 passing tests driving it, and a
+# canary `open(...).write(...)` planted in the region coverage called unreached
+# fired 47 times in the same run. Turning this on moved that file to 75.21% and
+# moved nothing else: an 85-file before/after diff showed zero regressions and
+# exactly one change. The presumed cause — SQLAlchemy running the synchronous
+# ORM inside a greenlet (`greenlet_spawn`) and coverage losing the caller's
+# frame across the switch — is inferred from the symptom rather than confirmed
+# in coverage's internals; see ARCHITECTURE.md §8. The two measurements are
+# what matter. Remove this line and the numbers below silently become fiction.
+concurrency = ["greenlet"]
+
+[tool.coverage.paths]
+# Maps the two jobs' checkout paths onto one another so `coverage combine`
+# treats `src/realty_lead_gen/x.py` from either runner as the same file.
+source = ["src/realty_lead_gen", "*/src/realty_lead_gen"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# This is a ratchet, not a target. It is set to the floor the combined suite
+# actually clears today (72.24%) so that CI is green and a regression turns it
+# red; the target remains 80. The gap is still concentrated and still known:
+# `pipeline/orchestrator.py`, `jobs/ingest.py` and `jobs/enrich.py` sit near
+# zero because nothing yet drives the ingest -> enrich chain end to end, and
+# `worker.py`, `jobs/daily_sweep.py` and `jobs/outbox_relay.py` are arq wiring
+# that only a running worker exercises. Raising this number means writing those
+# tests, not editing this line — the 60 -> 70 bump was paid for by
+# `tests/unit/test_lead_materialization.py` and
+# `tests/integration/test_score_job.py`, which together took `jobs/score.py`
+# from 0% to 100% and found two ordering bugs on the way. The 70 -> 72 bump was
+# not paid for by a test at all: it is the `concurrency = ["greenlet"]` line
+# above finally measuring request handlers that had been running untraced. Both
+# kinds of movement are worth having; only the first kind is progress.
+fail_under = 72
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
