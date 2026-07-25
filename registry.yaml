@@ -1,17 +1,19 @@
-# Agent registry
+# Agent registry — the source of truth for which agents exist here.
 #
-# One entry per agent. Each agent lives in its own top-level folder; the
-# `path` field is that folder, relative to the repository root.
+# One entry per agent. Each agent lives in its own top-level folder; `path`
+# is that folder, relative to the repository root.
 #
-# This file is the single source of truth for "what agents exist here". The
-# orchestrator at the repository root is expected to read it for discovery
-# rather than globbing directories, so that adding a folder is never enough
-# to accidentally activate an agent.
+# The orchestrator at the repository root is expected to read this file for
+# discovery rather than globbing directories, so that adding a folder is
+# never by itself enough to activate an agent.
 #
-# The orchestrator itself has not been built yet. Until it is, no field
-# below is load-bearing for any running code — treat this as a contract
-# being drafted, and expect the schema to change once the orchestrator's
-# real needs are known.
+# The orchestrator has not been built yet. Until it is, no field below is
+# load-bearing for any running code — treat this as a contract being drafted,
+# and expect the schema to change once the orchestrator's real needs are
+# known.
+#
+# The README.md table is a human-readable index of the same set. Keep the two
+# in sync; nothing checks them automatically yet.
 
 version: 1
 
@@ -29,14 +31,20 @@ agents:
       persona (flipper / wholesaler / buyer's agent); and materializes ranked
       leads into Postgres for a frontend to consume.
 
-    # How this agent is started today. Both are module paths inside the
-    # agent's own src/ layout, run from the agent's folder.
+    # How this agent is started today, run from the agent's own folder.
+    #
+    # Note the two entrypoints use different separators, because the tools
+    # that consume them do. This is not a typo:
+    #   - `api` is an ASGI target: `module:attribute`, passed to uvicorn.
+    #   - `worker` is an arq target: a fully dotted path, passed to `arq`.
+    # Copying either into the other's form will fail at startup.
     entrypoints:
-      api: realty_lead_gen.main:app # FastAPI ASGI app
-      worker: realty_lead_gen.worker:WorkerSettings # arq worker
+      api: realty_lead_gen.main:app # uvicorn realty_lead_gen.main:app
+      worker: realty_lead_gen.worker.WorkerSettings # arq realty_lead_gen.worker.WorkerSettings
 
     # How the outside world talks to it. This agent exposes a REST API and
-    # does not currently implement any orchestrator-level calling convention.
+    # does not implement any orchestrator-level calling convention, because
+    # none has been designed.
     interface: http
 
     # Infrastructure the agent needs in order to run at all.
@@ -45,6 +53,7 @@ agents:
       - redis # 7, arq queue + short-term cache
 
     docs:
+      claude: realty-lead-gen/CLAUDE.md
       readme: realty-lead-gen/README.md
       architecture: realty-lead-gen/ARCHITECTURE.md
 

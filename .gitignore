@@ -1,45 +1,72 @@
 # Repository-root ignores.
 #
-# Keep this file about things that are true for *every* agent — OS cruft,
-# editor state, secrets, and language caches that any agent folder might
-# produce. Agent-specific ignores belong in that agent's own .gitignore
-# (e.g. realty-lead-gen/.gitignore), so an agent folder stays correct if it
-# is ever extracted and used on its own.
+# Scope: things true for *every* agent — OS cruft, editor state, secrets, and
+# build output any language might produce. Anything specific to one agent's
+# toolchain belongs in that agent's own .gitignore, so the folder stays
+# correct if it is ever extracted and used on its own.
+#
+# Two traps this file deliberately avoids:
+#
+#   1. `.env.*` — looks reasonable, silently swallows committed templates
+#      (.env.sample, .env.template, .env.defaults) and any config that merely
+#      starts with `.env.`, such as config/.env.production.yaml. A missing
+#      template is invisible: the file just never lands, and the next person
+#      to clone cannot run the agent. Only real secret files are listed below.
+#
+#   2. `tmp/` — with no leading slash this matches a directory named `tmp` at
+#      *any* depth, so tests/fixtures/tmp/ disappears. Anchored to the root.
+#
+# When adding a pattern here, ask whether it could match something an agent
+# needs committed. If it could, anchor it or scope it to the agent instead.
 
-# OS
+# --- Secrets -----------------------------------------------------------
+# Real env files only. Templates (.env.example, .env.sample, .env.template)
+# are meant to be committed and are intentionally NOT matched.
+.env
+.env.local
+.env.*.local
+
+# --- OS ----------------------------------------------------------------
 .DS_Store
-.DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
 Thumbs.db
 desktop.ini
 
-# Editors / IDEs
+# --- Editors / IDEs ----------------------------------------------------
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Secrets. Never commit a real .env — commit .env.example instead.
-.env
-.env.*
-!.env.example
-
-# Python
-__pycache__/
-*.py[cod]
+# --- Build output ------------------------------------------------------
+# Unanchored on purpose: these are build artifacts wherever they appear.
+# If an agent ever has real source in a folder with one of these names,
+# override it in that agent's own .gitignore with a negation.
+dist/
+build/
 *.egg-info/
-.venv/
-venv/
-.mypy_cache/
-.ruff_cache/
+
+# --- Test / coverage artifacts -----------------------------------------
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 .pytest_cache/
 
-# Node (for agents that end up being JS/TS)
+# --- Language caches ---------------------------------------------------
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
 node_modules/
 
-# Scratch space
-tmp/
-_to_delete/
+# --- Virtualenvs -------------------------------------------------------
+.venv/
+venv/
+
+# --- Scratch -----------------------------------------------------------
+# Root-anchored: a nested tmp/ may be legitimate fixture data.
+/tmp/

@@ -1,0 +1,28 @@
+# Normalize line endings across every agent, regardless of the OS a
+# contributor is on. Without this, a checkout on Windows rewrites LF to CRLF
+# and the next commit shows every line of the file as changed.
+* text=auto eol=lf
+
+# Files that must keep LF even if something else would guess otherwise.
+*.sh text eol=lf
+Makefile text eol=lf
+
+# Binary — never diff, never line-ending-normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.whl binary
+
+# Lockfiles are machine-generated and enormous. Marking them generated
+# collapses them by default in GitHub diffs so a real change in the same PR
+# is not buried under thousands of lines. They stay fully diffable locally.
+uv.lock linguist-generated=true
+poetry.lock linguist-generated=true
+package-lock.json linguist-generated=true
+pnpm-lock.yaml linguist-generated=true
+yarn.lock linguist-generated=true
