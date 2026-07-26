@@ -14,7 +14,10 @@ orchestrator knows about any agent.
 ```
 .
 ├── AGENT_PROTOCOL.md   the agentcall/v1 contract — read this first
+├── _template/          a working agent to copy. Start here.
 ├── orchestrator/       discovery, manifest loading, transport, CLI
+├── tests/              contract and template tests
+├── .github/workflows/  CI for the orchestrator and for each agent
 ├── registry.yaml       which agents exist (paths only)
 ├── pyproject.toml      the orchestrator's own package
 ├── CLAUDE.md           repo-wide conventions
@@ -51,16 +54,26 @@ orchestrator's.
 
 ## Adding an agent
 
-1. Create a folder at the repository root, `kebab-case`. It must not collide
-   with a reserved root name — see [`CLAUDE.md`](./CLAUDE.md).
-2. Give it everything it needs to stand alone: its own dependency manifest,
-   tests, `README.md`, `CLAUDE.md`, and `.gitignore`.
-3. Implement [`agentcall/v1`](./AGENT_PROTOCOL.md) — read one JSON request
-   from stdin, write one envelope to stdout, logs on stderr.
-4. Write an `agent.yaml` in the folder declaring the run command and every
-   capability, including `describe`.
-5. Add its path to `registry.yaml` and a row to the table above.
-6. Run `uv run agents check`.
+Copy the template. It is a complete working agent in ~100 lines of
+standard-library Python, with every spot needing a change marked
+`TODO(new agent)`.
+
+```bash
+cp -r _template my-agent
+```
+
+Then rename it in `agent.yaml` and `agent_main.py`, replace the example
+capability with yours, add `- path: my-agent` to `registry.yaml` and a row to
+the table above, and verify:
+
+```bash
+uv run agents check
+```
+
+[`_template/README.md`](./_template/README.md) walks through it, including
+how to bring your own dependencies instead of staying standard-library only.
+Read [`AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md) before writing an agent from
+scratch rather than copying.
 
 The agent does not import the orchestrator, and the orchestrator does not
 import the agent. An agent folder should still work if copied out of this
@@ -83,11 +96,30 @@ purpose, because with one agent the design would be a guess:
 
 ## CI
 
-There is still no root-level CI. In a monorepo each agent needs a workflow
-scoped with a `paths:` filter, or its pipeline either never runs or runs on
-every commit. `realty-lead-gen/.github/workflows/ci.yml` is a complete
-pipeline but sits one level down, where GitHub Actions does not discover it,
-so it is **dormant**. `agents check` is the natural first root-level job.
+All workflows live in `.github/workflows/` at the root, because GitHub
+Actions does not discover workflows nested inside a directory. Each agent's
+pipeline is scoped with a `paths:` filter so it runs when that agent changes
+and not otherwise.
+
+| Workflow | Runs | Gate |
+|---|---|---|
+| `orchestrator.yml` | every change | registry validation + contract and template tests (no agent dependencies), then `agents check` against every registered agent |
+| `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy strict, unit tests, integration against real Postgres and Redis, combined coverage gate |
+
+`agents check` is the integration gate worth understanding: it calls
+`describe` on every registered agent, which costs nothing and no credentials,
+but catches a registry that has drifted from disk, a broken entrypoint, and a
+manifest that no longer matches its agent's code.
+
+`realty-lead-gen`'s pipeline used to sit in its own folder, where it was
+never discovered and therefore never ran. A repository with no red builds
+looks like a repository with passing builds, which is the more dangerous
+failure. The root copy is now authoritative; delete
+`realty-lead-gen/.github/` once it is in place, so two copies of a 120-line
+pipeline cannot drift.
+
+Not yet linted: the orchestrator's own Python. `realty-lead-gen` runs ruff
+and strict mypy on itself, and root code should hold the same bar.
 
 ## Licensing
 

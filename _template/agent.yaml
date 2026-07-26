@@ -1,0 +1,74 @@
+# Manifest for the template agent. Copy this with the folder.
+#
+# `_template` is deliberately NOT listed in the root registry.yaml, so it does
+# not show up in `agents list` as if it were a real agent. CI still exercises
+# it (tests/test_template.py), so this stays a working example rather than
+# rotting into a snippet that no longer runs.
+
+protocol: agentcall/v1
+
+# TODO(new agent): must equal the folder name. Discovery rejects a mismatch,
+# because otherwise error messages become ambiguous about which agent is meant.
+name: _template
+
+# TODO(new agent): one line. Shown in `agents list`, and it is what a future
+# router would match on — write it for someone deciding whether to call you.
+description: Template agent — copy this folder to start a new one.
+
+runtime:
+  type: subprocess
+  # TODO(new agent): a real agent usually runs through its own environment,
+  # e.g. ["uv", "run", "python", "-m", "my_agent.agentcall"]. This template is
+  # standard-library only so it runs anywhere with no install step.
+  #
+  # The working directory is always this file's folder. The orchestrator sets
+  # it and it is not configurable — that is what makes an agent's relative
+  # paths (.env, config files) resolve the same way every time.
+  command: ["python3", "agent_main.py"]
+
+capabilities:
+  # Every agent must declare `describe`. It is the handshake: it proves the
+  # agent is installed, its entrypoint resolves, and its manifest matches its
+  # code, without spending anything or touching the network.
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  # TODO(new agent): replace with your real capability.
+  #
+  # These schemas are documentation, not enforcement — the orchestrator does
+  # not validate against them, because the agent is the only party that can
+  # validate correctly and two validators drift. Write them anyway: they are
+  # how a human, or a future LLM-driven router, learns to call you without
+  # reading your source.
+  - name: greet
+    description: Return a greeting. Replace this with something useful.
+    input_schema:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Who to greet. Defaults to "world".
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [greeting]
+      properties:
+        greeting: { type: string }

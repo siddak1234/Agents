@@ -33,10 +33,23 @@ Concretely:
 ### Reserved root names
 
 An agent folder must not collide with root infrastructure. Taken: `.git`,
-`.github`, `.gitignore`, `.gitattributes`, `orchestrator`, `tests`,
-`AGENT_PROTOCOL.md`, `CLAUDE.md`, `README.md`, `pyproject.toml`,
+`.github`, `.gitignore`, `.gitattributes`, `_template`, `orchestrator`,
+`tests`, `AGENT_PROTOCOL.md`, `CLAUDE.md`, `README.md`, `pyproject.toml`,
 `registry.yaml`, `uv.lock`. Avoid generic names likely to be claimed later —
 `scripts`, `docs`, `tools`, `shared`.
+
+`_template/` is a working agent, deliberately absent from `registry.yaml` so
+it never appears in `agents list` as though it were real. `tests/` still runs
+it on every build, including copying it and renaming it the way the README
+says to — a template that quietly stopped working would be worse than none,
+because copying it is the first thing anyone does.
+
+## Start a new agent by copying `_template`
+
+Do not write one from scratch, and do not copy `realty-lead-gen` — it is a
+130-file production service and a poor first thing to imitate. The template
+is standard-library only, runs with no install step, and marks every spot
+needing a change with `TODO(new agent)`.
 
 ## Implementing or changing an agent
 
