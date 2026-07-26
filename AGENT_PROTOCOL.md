@@ -134,6 +134,9 @@ runtime:
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
   # cwd is always the folder containing this file. Not configurable — it is
   # what makes relative paths inside the agent (.env, alembic.ini) resolve.
+  env:
+    inherit: [ANTHROPIC_API_KEY, ANTHROPIC_MODEL_*]  # names or fnmatch patterns
+    set: { LOG_FORMAT: json }                        # literals, never secrets
 
 capabilities:
   - name: grade_photos
@@ -147,6 +150,37 @@ orchestrator**. The agent validates its own input — it is the only party
 that can do so correctly, and validating in both places means two
 definitions that drift. The schemas exist so a human, or a future
 LLM-driven router, can see how to call the agent without reading its source.
+
+## What the orchestrator guarantees
+
+Three properties hold on every call, and an agent may rely on them.
+
+**Working directory is the agent's own folder.** Not configurable. This is
+what makes an agent's relative paths resolve identically whoever invoked it.
+It matters more than it looks: `realty-lead-gen` reads `env_file=".env"` and
+gives every setting a default, so an agent started from the wrong directory
+would boot *successfully* on a development JWT secret and a localhost
+database. A configurable working directory is a configurable way to get that
+silently wrong.
+
+**The environment is deny-by-default.** An agent receives `PATH`, `HOME`,
+`LANG`, `LC_ALL`, `TMPDIR`, `TZ` — without which nothing can execute — plus
+exactly what its manifest names in `runtime.env`. Nothing else. An agent that
+grades photos has no business being able to read a database password merely
+because the process that launched it could. `inherit: ["*"]` is rejected by
+the manifest loader rather than merely discouraged.
+
+Declare the minimum a capability genuinely needs. `realty-lead-gen` is the
+worked example: the service holds database, Redis, MLS, portal, skip-tracing
+and JWT credentials, and its manifest inherits only the Claude keys, because
+that is all its capabilities use.
+
+**Output is bounded.** stdout is captured to a temporary file, not a pipe,
+and refused unread past 8 MiB. An envelope is kilobytes; anything approaching
+the limit is a runaway agent, and without the ceiling it would exhaust the
+orchestrator's memory rather than its own. Crossing it yields a `transport`
+error naming the size. stderr is kept but only its tail is attached to
+errors.
 
 ## What v1 deliberately leaves out
 

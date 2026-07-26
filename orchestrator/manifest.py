@@ -32,12 +32,32 @@ class Capability:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentEnv:
+    """What an agent is allowed to see of the orchestrator's environment.
+
+    Deny by default. An agent receives only the minimal base variables it
+    needs to execute at all (see `runner.BASE_ENV`) plus what it names here.
+
+    The alternative — handing every agent the whole environment — is one line
+    shorter and means a trivial agent receives every credential the
+    orchestrator happens to hold. An agent should not be able to read a
+    database password because it was started by a process that had one.
+    """
+
+    #: Names or fnmatch patterns inherited from the orchestrator's environment.
+    inherit: tuple[str, ...] = ()
+    #: Literal values. Never put a secret here — this file is committed.
+    set: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class AgentManifest:
     name: str
     description: str
     command: tuple[str, ...]
     workdir: Path
     capabilities: tuple[Capability, ...]
+    env: AgentEnv = AgentEnv()
 
     def capability(self, name: str) -> Capability | None:
         return next((c for c in self.capabilities if c.name == name), None)
@@ -92,6 +112,7 @@ def load(agent_dir: Path) -> AgentManifest:
         name=name,
         description=description,
         command=tuple(command),
+        env=_load_env(runtime.get("env"), path),
         # Always the manifest's own directory. Not configurable: this is what
         # makes an agent's relative paths (.env, alembic.ini) resolve, and a
         # configurable cwd is a configurable way to get that silently wrong.
@@ -124,6 +145,36 @@ def _load_capabilities(raw: Any, path: Path) -> tuple[Capability, ...]:
             )
         )
     return tuple(out)
+
+
+def _load_env(raw: Any, path: Path) -> AgentEnv:
+    if raw is None:
+        # Declaring nothing means inheriting nothing. Silence is the safe
+        # answer, not the permissive one.
+        return AgentEnv()
+    if not isinstance(raw, dict):
+        raise ManifestError(f"{path}: runtime.env must be a mapping")
+
+    inherit = raw.get("inherit", [])
+    if not isinstance(inherit, list) or not all(isinstance(v, str) and v for v in inherit):
+        raise ManifestError(f"{path}: runtime.env.inherit must be a list of names or patterns")
+    if "*" in inherit:
+        # The whole point is that this is impossible to do by accident.
+        raise ManifestError(
+            f"{path}: runtime.env.inherit may not be '*'. Name the variables this agent "
+            "actually needs; inheriting everything is what this setting exists to prevent."
+        )
+
+    assigned = raw.get("set", {})
+    if not isinstance(assigned, dict) or not all(
+        isinstance(k, str) and isinstance(v, (str, int, float, bool)) for k, v in assigned.items()
+    ):
+        raise ManifestError(f"{path}: runtime.env.set must be a mapping of names to scalars")
+
+    return AgentEnv(
+        inherit=tuple(inherit),
+        set=tuple((k, str(v)) for k, v in assigned.items()),
+    )
 
 
 def _as_schema(raw: Any) -> dict[str, Any]:

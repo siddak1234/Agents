@@ -26,6 +26,25 @@ runtime:
   # paths (.env, config files) resolve the same way every time.
   command: ["python3", "agent_main.py"]
 
+  # TODO(new agent): name the environment variables your agent actually needs.
+  #
+  # Deny by default: an agent sees only what it lists here, plus the base
+  # variables every process needs (PATH, HOME, LANG, LC_ALL, TMPDIR, TZ).
+  # Everything else the orchestrator holds is withheld — a trivial agent has
+  # no business being able to read a database password just because the
+  # process that started it could.
+  #
+  # Exact names or fnmatch patterns. `"*"` is rejected outright: inheriting
+  # everything is precisely what this setting exists to prevent.
+  #
+  #   env:
+  #     inherit: [MY_API_KEY, MY_SERVICE_*]
+  #     set:
+  #       LOG_FORMAT: json      # literal values only, never a secret —
+  #                             # this file is committed
+  #
+  # This template needs nothing, so it declares nothing.
+
 capabilities:
   # Every agent must declare `describe`. It is the handshake: it proves the
   # agent is installed, its entrypoint resolves, and its manifest matches its

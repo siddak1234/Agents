@@ -19,6 +19,23 @@ runtime:
   # configurable here.
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
 
+  # Least privilege: this agent sees only what is named here, plus the base
+  # variables every process needs (PATH, HOME, ...). Everything else in the
+  # orchestrator's environment is withheld.
+  #
+  # Note what is deliberately NOT here. This service holds database and Redis
+  # credentials, MLS and portal API tokens, a skip-tracing key and a JWT
+  # secret — and none of its agentcall capabilities need any of them. Photo
+  # grading needs Claude and nothing more. Widen this list only when a
+  # capability genuinely cannot work without a variable.
+  env:
+    inherit:
+      - ANTHROPIC_API_KEY
+      - ANTHROPIC_MODEL_* # reasoning / vision / cheap model selection
+      - LLM_MAX_COST_PER_LEAD_USD # per-lead cost circuit breaker
+      - APP_LOG_LEVEL
+      - APP_LOG_FORMAT
+
 capabilities:
   - name: describe
     description: Report this agent's name and capabilities. Costs nothing.

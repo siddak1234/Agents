@@ -4,7 +4,7 @@ The only place in the orchestrator that knows agents are processes. Swapping
 in HTTP later means adding a sibling of `call()`; the envelope in
 `contract.py` does not change.
 
-Two invariants this module exists to hold:
+Four invariants this module exists to hold:
 
   * The orchestrator never imports agent code. Each agent runs in its own
     interpreter with its own dependency set, so one agent's conflict cannot
@@ -12,22 +12,56 @@ Two invariants this module exists to hold:
   * The agent's working directory is its own folder. Everything inside an
     agent that resolves a relative path — `.env`, `alembic.ini` — depends on
     this, and getting it wrong misconfigures silently rather than loudly.
+  * An agent sees only the environment it declared. Deny by default.
+  * An agent cannot exhaust this process's memory by writing to stdout.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import subprocess
-from pathlib import Path
+import tempfile
+from typing import IO
 
 from orchestrator.contract import CallError, CallRequest, CallResult, ProtocolError
 from orchestrator.manifest import AgentManifest
 
+#: Passed to every agent regardless of what it declares — without these an
+#: agent cannot locate an interpreter, a home directory, or scratch space, so
+#: withholding them would not be a security posture, just a broken one. None
+#: of them carry credentials.
+BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TZ")
+
+#: Ceiling on an agent's stdout. A JSON envelope is kilobytes; anything near
+#: this is a bug, and without a ceiling a looping agent takes the orchestrator
+#: down with it. Output is written to a temporary file rather than a pipe, so
+#: crossing the limit costs disk we then refuse to read — never memory.
+MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+
 #: How much of a failing agent's stderr to attach. Enough to hold a
 #: traceback, small enough to stay readable in a terminal.
+STDERR_TAIL_BYTES = 64 * 1024
 STDERR_TAIL_LINES = 40
 
 DEFAULT_TIMEOUT_S = 120.0
+
+
+def build_env(manifest: AgentManifest, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The exact environment an agent will see.
+
+    Separate from `call` so it can be tested and inspected directly — "what
+    can this agent read?" should be answerable without running it.
+    """
+    env = {key: os.environ[key] for key in BASE_ENV if key in os.environ}
+    for pattern in manifest.env.inherit:
+        for key, value in os.environ.items():
+            if fnmatch.fnmatchcase(key, pattern):
+                env[key] = value
+    env.update(dict(manifest.env.set))
+    if extra:
+        env.update(extra)
+    return env
 
 
 def call(
@@ -43,41 +77,53 @@ def call(
     `transport` error, so a caller has exactly one shape to handle.
     """
     budget = _budget(request, timeout_s)
+    payload = request.encode().encode("utf-8")
 
-    try:
-        proc = subprocess.run(  # noqa: S603 — command comes from a repo-controlled manifest
-            list(manifest.command),
-            cwd=str(manifest.workdir),
-            input=request.encode(),
-            capture_output=True,
-            text=True,
-            timeout=budget,
-            env={**os.environ, **(env or {})},
-            check=False,
-        )
-    except FileNotFoundError:
-        return _transport(
-            request,
-            f"cannot execute {manifest.command[0]!r} for agent {manifest.name!r} "
-            f"(cwd {manifest.workdir}); is the agent installed?",
-        )
-    except subprocess.TimeoutExpired:
-        return CallResult.failure(
-            request.capability,
-            CallError("timeout", f"agent {manifest.name!r} exceeded {budget:g}s", retryable=True),
-        )
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            proc = subprocess.run(  # noqa: S603 — command comes from a repo-controlled manifest
+                list(manifest.command),
+                cwd=str(manifest.workdir),
+                input=payload,
+                stdout=out,
+                stderr=err,
+                timeout=budget,
+                env=build_env(manifest, env),
+                check=False,
+            )
+        except FileNotFoundError:
+            return _transport(
+                request,
+                f"cannot execute {manifest.command[0]!r} for agent {manifest.name!r} "
+                f"(cwd {manifest.workdir}); is the agent installed?",
+            )
+        except subprocess.TimeoutExpired:
+            return CallResult.failure(
+                request.capability,
+                CallError(
+                    "timeout", f"agent {manifest.name!r} exceeded {budget:g}s", retryable=True
+                ),
+            )
 
-    if proc.returncode != 0:
-        return _transport(
-            request,
-            f"agent {manifest.name!r} exited {proc.returncode}",
-            stderr=proc.stderr,
-        )
+        stderr = _tail(err)
 
-    try:
-        return CallResult.decode(proc.stdout, capability=request.capability)
-    except ProtocolError as exc:
-        return _transport(request, f"agent {manifest.name!r}: {exc}", stderr=proc.stderr)
+        if _size(out) > MAX_OUTPUT_BYTES:
+            return _transport(
+                request,
+                f"agent {manifest.name!r} wrote {_size(out)} bytes to stdout, over the "
+                f"{MAX_OUTPUT_BYTES} byte limit; output discarded unread",
+                stderr=stderr,
+            )
+
+        if proc.returncode != 0:
+            return _transport(
+                request, f"agent {manifest.name!r} exited {proc.returncode}", stderr=stderr
+            )
+
+        try:
+            return CallResult.decode(_read(out), capability=request.capability)
+        except ProtocolError as exc:
+            return _transport(request, f"agent {manifest.name!r}: {exc}", stderr=stderr)
 
 
 def describe(manifest: AgentManifest, *, timeout_s: float = 30.0) -> CallResult:
@@ -97,19 +143,27 @@ def _budget(request: CallRequest, timeout_s: float | None) -> float:
     return DEFAULT_TIMEOUT_S
 
 
-def _transport(request: CallRequest, message: str, *, stderr: str = "") -> CallResult:
-    tail = _tail(stderr)
-    if tail:
-        message = f"{message}\n--- agent stderr ---\n{tail}"
-    return CallResult.failure(request.capability, CallError("transport", message))
+def _size(fh: IO[bytes]) -> int:
+    fh.seek(0, os.SEEK_END)
+    return fh.tell()
 
 
-def _tail(text: str) -> str:
-    lines = text.strip().splitlines()
+def _read(fh: IO[bytes]) -> str:
+    fh.seek(0)
+    return fh.read().decode("utf-8", errors="replace")
+
+
+def _tail(fh: IO[bytes]) -> str:
+    size = _size(fh)
+    fh.seek(max(0, size - STDERR_TAIL_BYTES))
+    text = fh.read().decode("utf-8", errors="replace").strip()
+    lines = text.splitlines()
     if len(lines) <= STDERR_TAIL_LINES:
         return "\n".join(lines)
     return "\n".join(["...", *lines[-STDERR_TAIL_LINES:]])
 
 
-def resolve_repo_path(path: str | Path) -> Path:
-    return Path(path).expanduser().resolve()
+def _transport(request: CallRequest, message: str, *, stderr: str = "") -> CallResult:
+    if stderr:
+        message = f"{message}\n--- agent stderr ---\n{stderr}"
+    return CallResult.failure(request.capability, CallError("transport", message))

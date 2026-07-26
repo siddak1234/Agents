@@ -19,9 +19,10 @@ from pathlib import Path
 
 import pytest
 
+from orchestrator import runner as runner_mod
 from orchestrator.contract import CallRequest
 from orchestrator.discovery import DiscoveryError, load_registry
-from orchestrator.runner import call, describe
+from orchestrator.runner import BASE_ENV, build_env, call, describe
 
 STUB = '''
 import json, os, sys, time
@@ -40,6 +41,12 @@ elif cap == "echo":
     e = env(True, cap, {"echoed": req.get("input", {})})
 elif cap == "where":
     e = env(True, cap, {"cwd": os.getcwd()})
+elif cap == "environment":
+    e = env(True, cap, {"keys": sorted(os.environ)})
+elif cap == "flood":
+    real.write("x" * int((req.get("input") or {}).get("bytes", 100000)))
+    real.flush()
+    sys.exit(0)
 elif cap == "leak_stdout":
     real.write('{"level":"info","msg":"log line on stdout"}\\n')
     e = env(True, cap, {"fine": True})
@@ -56,7 +63,7 @@ json.dump(e, real)
 real.write("\\n")
 '''
 
-CAPS = ["describe", "echo", "where", "leak_stdout", "crash", "hang"]
+CAPS = ["describe", "echo", "where", "environment", "flood", "leak_stdout", "crash", "hang"]
 
 
 @pytest.fixture
@@ -73,6 +80,8 @@ def stub(tmp_path: Path):
             runtime:
               type: subprocess
               command: ["{sys.executable}", "agent_main.py"]
+              env:
+                inherit: [STUB_ALLOWED, STUB_PREFIXED_*]
             capabilities:
             """)
         + caps
@@ -154,6 +163,60 @@ def test_manifest_requires_describe(stub):
     manifest.write_text(text, encoding="utf-8")
     with pytest.raises(DiscoveryError, match="describe"):
         load_registry(stub.workdir.parent)
+
+
+def test_agent_sees_only_the_environment_it_declared(stub, monkeypatch):
+    """Least privilege, enforced. An undeclared secret must not reach an agent.
+
+    This is the test that would have caught the original implementation, which
+    passed `os.environ` wholesale — meaning any agent could read every
+    credential the orchestrator happened to hold.
+    """
+    monkeypatch.setenv("ORCHESTRATOR_SECRET", "do-not-leak")
+    monkeypatch.setenv("STUB_ALLOWED", "declared")
+    monkeypatch.setenv("STUB_PREFIXED_ONE", "declared by pattern")
+
+    keys = set(call(stub, CallRequest(capability="environment")).output["keys"])
+
+    assert "ORCHESTRATOR_SECRET" not in keys, "undeclared variable leaked to the agent"
+    assert "STUB_ALLOWED" in keys
+    assert "STUB_PREFIXED_ONE" in keys
+    assert "PATH" in keys, "base variables must still be present or nothing can run"
+
+
+def test_inherit_everything_is_rejected(stub):
+    manifest = stub.workdir / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "inherit: [STUB_ALLOWED, STUB_PREFIXED_*]", 'inherit: ["*"]'
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(DiscoveryError, match="may not be"):
+        load_registry(stub.workdir.parent)
+
+
+def test_env_defaults_to_nothing(tmp_path, stub):
+    """A manifest that declares no env inherits none — silence is not consent."""
+    manifest = stub.workdir / "agent.yaml"
+    kept = [
+        line
+        for line in manifest.read_text(encoding="utf-8").splitlines()
+        if "env:" not in line and "inherit:" not in line
+    ]
+    manifest.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    reloaded = load_registry(stub.workdir.parent).get("stub-agent")
+    assert reloaded.env.inherit == ()
+    assert set(build_env(reloaded)) <= set(BASE_ENV)
+
+
+def test_runaway_stdout_is_capped(stub, monkeypatch):
+    """A looping agent must not take the orchestrator's memory with it."""
+    monkeypatch.setattr(runner_mod, "MAX_OUTPUT_BYTES", 1024)
+    result = call(stub, CallRequest(capability="flood", input={"bytes": 50_000}))
+    assert result.error.type == "transport"
+    assert "over the" in result.error.message and "limit" in result.error.message
 
 
 def test_envelope_survives_a_round_trip():
