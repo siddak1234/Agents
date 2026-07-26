@@ -69,9 +69,7 @@ def test_unknown_capability_is_invalid_request(template):
 
 def test_runs_without_the_orchestrator(template):
     """The self-containment claim, enforced rather than asserted in prose."""
-    request = json.dumps(
-        {"protocol": PROTOCOL, "capability": "describe", "input": {}}
-    )
+    request = json.dumps({"protocol": PROTOCOL, "capability": "describe", "input": {}})
     proc = subprocess.run(
         [sys.executable, "agent_main.py"],
         cwd=TEMPLATE,

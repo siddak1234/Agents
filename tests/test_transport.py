@@ -20,11 +20,11 @@ from pathlib import Path
 import pytest
 
 from orchestrator import runner as runner_mod
-from orchestrator.contract import CallRequest
+from orchestrator.contract import PROTOCOL, CallRequest, CallResult
 from orchestrator.discovery import DiscoveryError, load_registry
 from orchestrator.runner import BASE_ENV, build_env, call, describe
 
-STUB = '''
+STUB = """
 import json, os, sys, time
 P = "agentcall/v1"
 def env(ok, cap, out=None, err=None):
@@ -61,7 +61,7 @@ else:
 sys.stdout = real
 json.dump(e, real)
 real.write("\\n")
-'''
+"""
 
 CAPS = ["describe", "echo", "where", "environment", "flood", "leak_stdout", "crash", "hang"]
 
@@ -220,8 +220,6 @@ def test_runaway_stdout_is_capped(stub, monkeypatch):
 
 
 def test_envelope_survives_a_round_trip():
-    from orchestrator.contract import PROTOCOL, CallResult
-
     wire = json.dumps(
         {
             "protocol": PROTOCOL,

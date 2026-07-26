@@ -8,6 +8,7 @@ make something callable.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +36,7 @@ class Registry:
             known = ", ".join(sorted(self.agents)) or "none"
             raise DiscoveryError(f"unknown agent {name!r}; registered: {known}") from None
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[AgentManifest]:
         return iter(sorted(self.agents.values(), key=lambda m: m.name))
 
     def __len__(self) -> int:
@@ -64,7 +65,9 @@ def load_registry(root: Path | None = None) -> Registry:
     if not isinstance(raw, dict):
         raise DiscoveryError(f"{path}: must be a mapping")
     if raw.get("version") != REGISTRY_VERSION:
-        raise DiscoveryError(f"{path}: expected version {REGISTRY_VERSION}, got {raw.get('version')!r}")
+        raise DiscoveryError(
+            f"{path}: expected version {REGISTRY_VERSION}, got {raw.get('version')!r}"
+        )
 
     entries = raw.get("agents")
     if not isinstance(entries, list):

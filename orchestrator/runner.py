@@ -24,7 +24,7 @@ import subprocess
 import tempfile
 from typing import IO
 
-from orchestrator.contract import CallError, CallRequest, CallResult, ProtocolError
+from orchestrator.contract import DESCRIBE, CallError, CallRequest, CallResult, ProtocolError
 from orchestrator.manifest import AgentManifest
 
 #: Passed to every agent regardless of what it declares — without these an
@@ -54,10 +54,13 @@ def build_env(manifest: AgentManifest, extra: dict[str, str] | None = None) -> d
     can this agent read?" should be answerable without running it.
     """
     env = {key: os.environ[key] for key in BASE_ENV if key in os.environ}
-    for pattern in manifest.env.inherit:
-        for key, value in os.environ.items():
-            if fnmatch.fnmatchcase(key, pattern):
-                env[key] = value
+    env.update(
+        {
+            key: value
+            for key, value in os.environ.items()
+            if any(fnmatch.fnmatchcase(key, pattern) for pattern in manifest.env.inherit)
+        }
+    )
     env.update(dict(manifest.env.set))
     if extra:
         env.update(extra)
@@ -128,8 +131,6 @@ def call(
 
 def describe(manifest: AgentManifest, *, timeout_s: float = 30.0) -> CallResult:
     """The handshake: prove the agent runs and its manifest matches its code."""
-    from orchestrator.contract import DESCRIBE
-
     return call(manifest, CallRequest(capability=DESCRIBE), timeout_s=timeout_s)
 
 

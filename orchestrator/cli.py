@@ -16,8 +16,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
-from orchestrator.contract import DESCRIBE, CallRequest
+from orchestrator.contract import DESCRIBE, CallRequest, CallResult
 from orchestrator.discovery import DiscoveryError, Registry, load_registry
 from orchestrator.runner import call, describe
 
@@ -158,7 +159,7 @@ def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
-def _read_input(args: argparse.Namespace) -> dict:
+def _read_input(args: argparse.Namespace) -> dict[str, Any]:
     # Reading stdin implicitly when no flag is given looks convenient and
     # hangs forever the moment this runs anywhere without a terminal — a
     # script, a cron job, CI. Stdin is only ever read when asked for by name.
@@ -176,7 +177,7 @@ def _read_input(args: argparse.Namespace) -> dict:
     return payload
 
 
-def _emit(result) -> int:
+def _emit(result: CallResult) -> int:
     print(json.dumps(result.to_wire(), indent=2))
     return 0 if result.ok else 1
 

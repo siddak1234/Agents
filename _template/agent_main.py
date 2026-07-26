@@ -63,7 +63,10 @@ def main() -> int:
     return 0
 
 
-def dispatch(raw: str) -> dict[str, Any]:
+# Many returns on purpose: each branch is one validation failure or one
+# capability. Collapsing them into a single result variable would hide which
+# check rejected the request, which is the only thing a caller wants to know.
+def dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
     try:
         request = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
@@ -101,9 +104,7 @@ def dispatch(raw: str) -> dict[str, Any]:
         return ok(capability, {"greeting": f"Hello, {who.strip()}!"})
 
     declared = ", ".join(n for n, _ in CAPABILITIES)
-    return fail(
-        capability, "invalid_request", f"unknown capability; this agent offers: {declared}"
-    )
+    return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
 
 # RULE 4: a missing credential or unreachable dependency returns

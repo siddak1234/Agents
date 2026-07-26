@@ -28,7 +28,50 @@ build-backend = "hatchling.build"
 packages = ["orchestrator"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.14", "mypy>=1.14", "types-PyYAML>=6.0", "pre-commit>=4.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# The orchestrator is held to the same bar it asks of agents. realty-lead-gen
+# runs ruff and strict mypy on itself; shared code that everything else
+# depends on has no business being the unchecked part of the repo.
+
+# Scope: root tooling lints root-owned code only — `orchestrator`, `tests`,
+# and `_template`. Agent folders configure and lint themselves, the same way
+# they own their dependencies; running root's rules over an agent would
+# contradict the isolation the whole design rests on. Commands therefore pass
+# explicit paths rather than `.` (see `make lint` equivalents in CI).
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# Same selection as realty-lead-gen, minus the rules that only matter for a
+# web service. S (bandit) is on: this package spawns processes and reads YAML.
+# TCH is deliberately absent — TYPE_CHECKING blocks buy nothing in a package
+# this small and cost readability in code people are meant to learn from.
+select = [
+    "E", "W", "F", "I", "UP", "B", "BLE", "SIM", "N", "RUF",
+    "S", "DTZ", "PL", "TRY", "PERF", "LOG",
+]
+ignore = [
+    "E501",    # line length is the formatter's job
+    "TRY003",  # long exception messages are the point — they name the file
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, spawn stub agents, and compare against literal values on
+# purpose; naming every expected number would obscure what is being asserted.
+"tests/*" = ["S101", "S603", "S607", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+# Shipped code only, matching realty-lead-gen, which types-checks `src` and
+# `scripts` but not its tests. Strict annotations on pytest fixtures buy
+# little and cost readability. `_template` is excluded for the same reason
+# doubled: its job is to be read.
+files = ["orchestrator"]
