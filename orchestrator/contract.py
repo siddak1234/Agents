@@ -1,0 +1,165 @@
+"""The agentcall/v1 wire types.
+
+This module is the single definition of what crosses the process boundary.
+It deliberately depends on nothing but the standard library: the contract
+outlives whatever transport carries it, so it must not acquire a transport's
+dependencies. See AGENT_PROTOCOL.md for the prose.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any, Final
+
+PROTOCOL: Final = "agentcall/v1"
+
+#: The one capability every agent implements. Handshake, not business logic.
+DESCRIBE: Final = "describe"
+
+#: See AGENT_PROTOCOL.md. `transport` is orchestrator-side only.
+ERROR_TYPES: Final = frozenset(
+    {"invalid_request", "unavailable", "timeout", "internal", "transport"}
+)
+
+
+class ProtocolError(Exception):
+    """An agent returned something that is not a valid envelope."""
+
+
+@dataclass(frozen=True, slots=True)
+class Usage:
+    """Resource accounting. Always present, zeroed when nothing was spent."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_micros: int = 0
+
+    @classmethod
+    def from_wire(cls, raw: Any) -> Usage:
+        if not isinstance(raw, dict):
+            return cls()
+        return cls(
+            input_tokens=int(raw.get("input_tokens") or 0),
+            output_tokens=int(raw.get("output_tokens") or 0),
+            cost_micros=int(raw.get("cost_micros") or 0),
+        )
+
+    def to_wire(self) -> dict[str, int]:
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cost_micros": self.cost_micros,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CallError:
+    type: str
+    message: str
+    retryable: bool = False
+
+    def __post_init__(self) -> None:
+        if self.type not in ERROR_TYPES:
+            raise ProtocolError(f"unknown error type {self.type!r}")
+
+    @classmethod
+    def from_wire(cls, raw: Any) -> CallError:
+        if not isinstance(raw, dict):
+            raise ProtocolError("error must be an object")
+        etype = raw.get("type")
+        if etype not in ERROR_TYPES:
+            # An agent inventing its own taxonomy is a bug in the agent, but
+            # losing the message would make it unfixable. Keep the text.
+            return cls("internal", f"undeclared error type {etype!r}: {raw.get('message')}")
+        return cls(str(etype), str(raw.get("message", "")), bool(raw.get("retryable", False)))
+
+    def to_wire(self) -> dict[str, Any]:
+        return {"type": self.type, "message": self.message, "retryable": self.retryable}
+
+
+@dataclass(frozen=True, slots=True)
+class CallRequest:
+    capability: str
+    input: dict[str, Any] = field(default_factory=dict)
+    request_id: str = ""
+    deadline_ms: int | None = None
+
+    def to_wire(self) -> dict[str, Any]:
+        wire: dict[str, Any] = {
+            "protocol": PROTOCOL,
+            "capability": self.capability,
+            "input": self.input,
+            "request_id": self.request_id,
+        }
+        if self.deadline_ms is not None:
+            wire["deadline_ms"] = self.deadline_ms
+        return wire
+
+    def encode(self) -> str:
+        return json.dumps(self.to_wire())
+
+
+@dataclass(frozen=True, slots=True)
+class CallResult:
+    ok: bool
+    capability: str
+    output: dict[str, Any] | None = None
+    usage: Usage = field(default_factory=Usage)
+    error: CallError | None = None
+
+    @classmethod
+    def failure(cls, capability: str, error: CallError) -> CallResult:
+        return cls(ok=False, capability=capability, output=None, error=error)
+
+    @classmethod
+    def decode(cls, raw: str, *, capability: str) -> CallResult:
+        """Parse an agent's stdout. Raises ProtocolError on anything invalid.
+
+        Callers turn that into a `transport` error rather than propagating —
+        a malformed envelope is the orchestrator's problem to report, not the
+        caller's problem to interpret.
+        """
+        text = raw.strip()
+        if not text:
+            raise ProtocolError("agent produced no output on stdout")
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            # Overwhelmingly this means the agent leaked a log line to
+            # stdout. Say so — the generic parse error sends people hunting
+            # in the wrong place.
+            raise ProtocolError(
+                f"stdout is not a single JSON object ({exc}); "
+                "the agent most likely wrote a log line to stdout"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ProtocolError("envelope must be a JSON object")
+        if payload.get("protocol") != PROTOCOL:
+            raise ProtocolError(f"expected protocol {PROTOCOL}, got {payload.get('protocol')!r}")
+
+        ok = bool(payload.get("ok"))
+        error = None if payload.get("error") is None else CallError.from_wire(payload["error"])
+        if not ok and error is None:
+            raise ProtocolError("ok=false requires an error object")
+        output = payload.get("output")
+        if ok and not isinstance(output, dict):
+            raise ProtocolError("ok=true requires an output object")
+
+        return cls(
+            ok=ok,
+            capability=str(payload.get("capability", capability)),
+            output=output if ok else None,
+            usage=Usage.from_wire(payload.get("usage")),
+            error=error,
+        )
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "protocol": PROTOCOL,
+            "ok": self.ok,
+            "capability": self.capability,
+            "output": self.output,
+            "usage": self.usage.to_wire(),
+            "error": None if self.error is None else self.error.to_wire(),
+        }

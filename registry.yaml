@@ -1,63 +1,16 @@
-# Agent registry — the source of truth for which agents exist here.
+# Agent registry — which agents exist in this repository.
 #
-# One entry per agent. Each agent lives in its own top-level folder; `path`
-# is that folder, relative to the repository root.
+# Paths only. Everything else about an agent lives in that agent's own
+# `agent.yaml`, so adding a capability or renaming a module never touches
+# this file, and an agent folder stays self-describing if extracted.
 #
-# The orchestrator at the repository root is expected to read this file for
-# discovery rather than globbing directories, so that adding a folder is
-# never by itself enough to activate an agent.
+# Discovery is by declaration, never by globbing: a folder appearing in the
+# repository is not enough to make it callable. It has to be listed here and
+# it has to contain an `agent.yaml`, or `agents check` fails.
 #
-# The orchestrator has not been built yet. Until it is, no field below is
-# load-bearing for any running code — treat this as a contract being drafted,
-# and expect the schema to change once the orchestrator's real needs are
-# known.
-#
-# The README.md table is a human-readable index of the same set. Keep the two
-# in sync; nothing checks them automatically yet.
+# The declared folder name must equal the `name` in its agent.yaml.
 
-version: 1
+version: 2
 
 agents:
-  - name: realty-lead-gen
-    path: realty-lead-gen
-    status: active
-    language: python
-    python: "3.13"
-
-    summary: >-
-      Agentic real-estate lead-generation backend. Ingests listings from MLS,
-      portals, and off-market sources; enriches each property with
-      Claude-powered condition grading, valuation, and comps; scores per
-      persona (flipper / wholesaler / buyer's agent); and materializes ranked
-      leads into Postgres for a frontend to consume.
-
-    # How this agent is started today, run from the agent's own folder.
-    #
-    # Note the two entrypoints use different separators, because the tools
-    # that consume them do. This is not a typo:
-    #   - `api` is an ASGI target: `module:attribute`, passed to uvicorn.
-    #   - `worker` is an arq target: a fully dotted path, passed to `arq`.
-    # Copying either into the other's form will fail at startup.
-    entrypoints:
-      api: realty_lead_gen.main:app # uvicorn realty_lead_gen.main:app
-      worker: realty_lead_gen.worker.WorkerSettings # arq realty_lead_gen.worker.WorkerSettings
-
-    # How the outside world talks to it. This agent exposes a REST API and
-    # does not implement any orchestrator-level calling convention, because
-    # none has been designed.
-    interface: http
-
-    # Infrastructure the agent needs in order to run at all.
-    depends_on:
-      - postgres # 17 + PostGIS 3.5, canonical store
-      - redis # 7, arq queue + short-term cache
-
-    docs:
-      claude: realty-lead-gen/CLAUDE.md
-      readme: realty-lead-gen/README.md
-      architecture: realty-lead-gen/ARCHITECTURE.md
-
-    notes: >-
-      Boots without any vendor API keys — source adapters disable themselves
-      when their credentials are absent, so the pipeline degrades gracefully
-      in dev. See realty-lead-gen/.env.example for the full key list.
+  - path: realty-lead-gen

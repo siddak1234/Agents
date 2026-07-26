@@ -1,92 +1,97 @@
 # Agents
 
-A monorepo of independent agents. Every agent lives in its own top-level
-folder and owns its entire stack — language, dependencies, tests, docs, and
-deployment. The repository root is reserved for the **agent orchestrator**:
-the layer that discovers agents, routes work to them, and coordinates work
-spanning more than one.
+A repository of agents that can be discovered and called. Every agent lives
+in its own top-level folder and owns its entire stack. The repository root is
+the **orchestrator**: it finds the agents and calls them.
 
-The orchestrator does not exist yet. What is here today is the structure it
-will be built into, plus the first agent.
+An agent here is something you **call**, not something you boot — one JSON
+request in, one structured result out, with usage attached. That contract is
+[`AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md), and it is the only thing the
+orchestrator knows about any agent.
 
 ## Layout
 
 ```
 .
-├── README.md          you are here
-├── CLAUDE.md          repo-wide conventions
-├── registry.yaml      the agent list — source of truth for discovery
-├── .gitignore         root-level ignores (read its header before editing)
-├── .gitattributes     line endings + generated-file marking
-└── <agent-name>/      one folder per agent
+├── AGENT_PROTOCOL.md   the agentcall/v1 contract — read this first
+├── orchestrator/       discovery, manifest loading, transport, CLI
+├── registry.yaml       which agents exist (paths only)
+├── pyproject.toml      the orchestrator's own package
+├── CLAUDE.md           repo-wide conventions
+└── <agent-name>/       one folder per agent, each with its own agent.yaml
 ```
-
-Adding an agent adds a folder at this level. Nothing else moves.
 
 ## Agents
 
-| Agent | Status | Stack |
+| Agent | Status | Capabilities |
 |---|---|---|
-| [`realty-lead-gen`](./realty-lead-gen) | active | Python 3.13 · FastAPI · Postgres+PostGIS · Redis/arq |
+| [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
 
-Full details — summary, entrypoints, dependencies — live in
-[`registry.yaml`](./registry.yaml). Each agent's own `README.md` is the place
-to start when working on it.
+`agents list` prints this from the manifests, so it is never stale.
+
+## Calling an agent
+
+```bash
+uv sync                            # once, for the orchestrator itself
+uv run agents list                 # what is here
+uv run agents describe <agent>     # handshake — runs the agent, costs nothing
+uv run agents call <agent> <capability> --input '{"...": "..."}'
+uv run agents check                # describe every agent; non-zero if any fails
+```
+
+`check` is the one to wire into CI. It catches a registry that has drifted
+from disk, a broken entrypoint, and a manifest that no longer matches its
+agent — without spending anything.
+
+Every call runs the agent as a subprocess **in the agent's own folder, using
+the agent's own environment**. That is not an implementation detail: it is
+what makes an agent's relative paths — `.env`, `alembic.ini` — resolve, and
+it is why one agent's dependencies can never break another's or the
+orchestrator's.
 
 ## Adding an agent
 
-1. Create a folder at the repository root named after the agent
-   (`kebab-case`). It must not collide with a reserved root name — see
-   [`CLAUDE.md`](./CLAUDE.md).
+1. Create a folder at the repository root, `kebab-case`. It must not collide
+   with a reserved root name — see [`CLAUDE.md`](./CLAUDE.md).
 2. Give it everything it needs to stand alone: its own dependency manifest,
-   tests, `README.md`, `CLAUDE.md` for its house rules, and a `.gitignore`
-   for anything specific to its toolchain.
-3. Add an entry to `registry.yaml`.
-4. Add a row to the table above.
+   tests, `README.md`, `CLAUDE.md`, and `.gitignore`.
+3. Implement [`agentcall/v1`](./AGENT_PROTOCOL.md) — read one JSON request
+   from stdin, write one envelope to stdout, logs on stderr.
+4. Write an `agent.yaml` in the folder declaring the run command and every
+   capability, including `describe`.
+5. Add its path to `registry.yaml` and a row to the table above.
+6. Run `uv run agents check`.
 
-The rule of thumb: an agent folder should still make sense if someone copied
-it out of this repo and ran it by itself. The orchestrator depends on agents;
-agents do not depend on the orchestrator.
+The agent does not import the orchestrator, and the orchestrator does not
+import the agent. An agent folder should still work if copied out of this
+repo — `realty-lead-gen` answers a request piped straight into
+`uv run python -m realty_lead_gen.agentcall` with nothing else present.
 
-Steps 3 and 4 are not yet enforced by anything — no check verifies that the
-registry, this table, and the folders on disk agree. Adding that check is
-worth doing before the third agent lands.
+## What the orchestrator does not do yet
 
-## The orchestrator (not yet built)
+Discovery, one transport, and a CLI. Everything past that is unbuilt on
+purpose, because with one agent the design would be a guess:
 
-The root is where cross-agent concerns will live once there is more than one
-agent to coordinate. `registry.yaml` is the first piece: discovery by
-explicit declaration rather than directory globbing, so creating a folder is
-never by itself enough to activate an agent.
-
-Deliberately unresolved until there is a second agent to design against:
-
-- **Calling convention.** `realty-lead-gen` exposes a REST API and nothing
-  else. Whether the orchestrator speaks HTTP to agents, imports them as
-  libraries, or shells out is open, and answering it from a sample size of
-  one would be guessing.
-- **Shared runtime.** Each agent brings its own virtualenv today. Whether
-  that stays true, or Python agents share a `uv` workspace, is likewise open.
+- **Routing.** Choosing an agent by capability rather than by name.
+- **Composition.** Chaining agents, fan-out, retries across agents. The
+  protocol keeps agents as leaves so composition can live here later.
+- **Cost aggregation.** Every envelope carries `usage`; nothing sums it yet.
+- **Other transports.** The envelope is transport-agnostic; HTTP or a queue
+  would touch only `runner.py`.
+- **Registry drift check.** `agents check` catches a bad manifest, but
+  nothing verifies the README table against the registry.
 
 ## CI
 
-There is no root-level CI yet, and this is a real gap rather than an
-oversight: in a monorepo each agent needs a root workflow scoped with a
-`paths:` filter, or its pipeline either never runs or runs on every commit
-touching any agent.
-
-`realty-lead-gen/.github/workflows/ci.yml` is a complete pipeline — lint,
-typecheck, unit tests, integration against real Postgres and Redis, and a
-combined coverage gate — but GitHub Actions only discovers workflows at the
-repository root, so nested one level down it is **dormant**. It was left
-unmodified so the agent folder stays self-contained. Activating it means a
-root `.github/workflows/realty-lead-gen-ci.yml` with a `paths:` filter on
-`realty-lead-gen/**` and adjusted working directory, uv cache glob, and
-artifact paths.
+There is still no root-level CI. In a monorepo each agent needs a workflow
+scoped with a `paths:` filter, or its pipeline either never runs or runs on
+every commit. `realty-lead-gen/.github/workflows/ci.yml` is a complete
+pipeline but sits one level down, where GitHub Actions does not discover it,
+so it is **dormant**. `agents check` is the natural first root-level job.
 
 ## Licensing
 
-There is no repository-wide license. Licensing is per agent: each agent
-folder carries its own `LICENSE`, and `realty-lead-gen/LICENSE` is
-proprietary. A new agent should ship with an explicit `LICENSE` of its own
-rather than inheriting an assumption.
+No repository-wide license. Licensing is per agent: each agent folder
+carries its own `LICENSE`, and `realty-lead-gen/LICENSE` is proprietary. A
+new agent should ship an explicit `LICENSE` rather than inherit an
+assumption.

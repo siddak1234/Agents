@@ -1,0 +1,83 @@
+# How the repository orchestrator calls this agent.
+# Contract: AGENT_PROTOCOL.md at the repository root.
+#
+# This file belongs to the agent, not to the orchestrator. Nothing here
+# depends on the orchestrator existing — deleting it leaves the service and
+# its Makefile untouched.
+
+protocol: agentcall/v1
+name: realty-lead-gen
+description: >-
+  Real-estate lead generation — grades property condition from photos,
+  values and comps a parcel, and scores it per persona.
+
+runtime:
+  type: subprocess
+  # Run through `uv` so the agent uses its own locked environment. The
+  # working directory is always this file's folder, which is what makes
+  # `.env` and `alembic.ini` resolve; the orchestrator sets it and it is not
+  # configurable here.
+  command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  - name: grade_photos
+    description: >-
+      Grade property photos on the Fannie Mae UAD 3.6 condition scale and
+      estimate a rehab range. One Claude vision call; batches of roughly ten
+      photos. Requires ANTHROPIC_API_KEY, and returns an `unavailable` error
+      rather than failing when it is absent.
+    input_schema:
+      type: object
+      required: [photo_urls]
+      properties:
+        photo_urls:
+          type: array
+          minItems: 1
+          items: { type: string, format: uri }
+          description: Publicly reachable image URLs.
+        market_hint:
+          type: string
+          description: Free-text market context, e.g. "Austin, TX".
+      additionalProperties: false
+    output_schema:
+      type: object
+      required:
+        [overall_condition, overall_confidence, rehab_total_low_cents,
+         rehab_total_high_cents, systems, red_flags]
+      properties:
+        overall_condition:
+          type: string
+          description: UAD grade, C1 through C6.
+        overall_confidence: { type: number, minimum: 0, maximum: 1 }
+        # Money is integer cents everywhere in this agent — see CLAUDE.md.
+        rehab_total_low_cents: { type: integer }
+        rehab_total_high_cents: { type: integer }
+        systems:
+          type: array
+          items: { type: object }
+        red_flags:
+          type: array
+          items: { type: string }
+        notes_for_reviewer: { type: [string, "null"] }
+        model: { type: string }

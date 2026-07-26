@@ -1,0 +1,34 @@
+[project]
+name = "agents-orchestrator"
+version = "0.1.0"
+description = "Discovers and calls the agents in this repository over agentcall/v1."
+readme = "README.md"
+requires-python = ">=3.13"
+
+# One dependency, on purpose. The orchestrator's job is to read a manifest
+# and spawn a process; everything else is the standard library. Each agent
+# brings its own dependency set inside its own folder, which is what keeps a
+# heavy agent from making the orchestrator heavy.
+dependencies = ["pyyaml>=6.0"]
+
+[project.scripts]
+agents = "orchestrator.cli:main"
+
+# Deliberately NOT a uv workspace. Declaring the agent folders as workspace
+# members would resolve every agent's dependencies into one lockfile, which
+# is exactly the coupling the subprocess transport exists to avoid: one
+# agent pinning an incompatible version would then break the others. Each
+# agent is synced independently, from its own folder.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["orchestrator"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

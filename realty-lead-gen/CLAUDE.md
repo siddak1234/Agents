@@ -54,6 +54,25 @@ themselves when their credentials are absent, so the pipeline degrades
 gracefully in dev and demo. Preserve that property: a missing key is a
 disabled adapter, never a crash. `.env.example` lists every key.
 
+## This agent's orchestrator entrypoint
+
+`src/realty_lead_gen/agentcall.py` implements `agentcall/v1` (see
+`AGENT_PROTOCOL.md` at the repository root) and is what
+`uv run agents call realty-lead-gen ...` invokes. It is an **adapter**: it
+translates the wire protocol into calls on `realty_lead_gen.agents` and back.
+No business logic belongs there.
+
+Its capability list mirrors `agent.yaml` by hand. When you add a capability,
+change both, then run `uv run agents check` from the repository root.
+
+The two traps it exists to avoid, both easy to reintroduce:
+
+- `configure_logging` sends structlog to **stdout** (`logging.py`). The
+  adapter repoints `sys.stdout` at stderr before anything runs, because one
+  log line on stdout makes the response envelope unparseable.
+- `describe` must answer without importing `anthropic`, SQLAlchemy, or
+  settings, so keep those imports inside the capability that needs them.
+
 ## CI is currently dormant
 
 `.github/workflows/ci.yml` here is a complete pipeline — lint, typecheck,

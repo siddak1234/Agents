@@ -1,0 +1,214 @@
+"""`agents` — the command-line face of the orchestrator.
+
+    agents list
+    agents describe <agent>
+    agents call <agent> <capability> [--input JSON | --input-file PATH]
+    agents check
+
+`check` is the one to run in CI: it loads every manifest and calls
+`describe` on every agent, which catches a registry that has drifted from
+disk, a broken entrypoint, or a manifest that no longer matches its code.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from orchestrator.contract import DESCRIBE, CallRequest
+from orchestrator.discovery import DiscoveryError, Registry, load_registry
+from orchestrator.runner import call, describe
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return 2
+
+    try:
+        registry = load_registry(args.root)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    handlers = {
+        "list": _cmd_list,
+        "describe": _cmd_describe,
+        "call": _cmd_call,
+        "check": _cmd_check,
+    }
+    return handlers[args.command](registry, args)
+
+
+def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "name": m.name,
+                        "description": m.description,
+                        "capabilities": list(m.capability_names),
+                    }
+                    for m in registry
+                ],
+                indent=2,
+            )
+        )
+        return 0
+    if not len(registry):
+        print("no agents registered")
+        return 0
+    width = max(len(m.name) for m in registry)
+    for m in registry:
+        caps = ", ".join(c for c in m.capability_names if c != DESCRIBE) or "—"
+        print(f"{m.name:<{width}}  {m.description}")
+        print(f"{'':<{width}}  capabilities: {caps}")
+    return 0
+
+
+def _cmd_describe(registry: Registry, args: argparse.Namespace) -> int:
+    try:
+        manifest = registry.get(args.agent)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.static:
+        # Read the manifest without running anything. Useful when the agent's
+        # dependencies are not installed on this machine.
+        print(
+            json.dumps(
+                {
+                    "name": manifest.name,
+                    "description": manifest.description,
+                    "workdir": str(manifest.workdir),
+                    "command": list(manifest.command),
+                    "capabilities": [
+                        {
+                            "name": c.name,
+                            "description": c.description,
+                            "input_schema": c.input_schema,
+                            "output_schema": c.output_schema,
+                        }
+                        for c in manifest.capabilities
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    return _emit(describe(manifest))
+
+
+def _cmd_call(registry: Registry, args: argparse.Namespace) -> int:
+    try:
+        manifest = registry.get(args.agent)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if manifest.capability(args.capability) is None:
+        known = ", ".join(manifest.capability_names)
+        print(
+            f"error: agent {manifest.name!r} declares no capability "
+            f"{args.capability!r}; declared: {known}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        payload = _read_input(args)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"error: cannot read input: {exc}", file=sys.stderr)
+        return 2
+
+    result = call(
+        manifest,
+        CallRequest(
+            capability=args.capability,
+            input=payload,
+            request_id=args.request_id or "",
+            deadline_ms=args.deadline_ms,
+        ),
+        timeout_s=args.timeout,
+    )
+    return _emit(result)
+
+
+def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
+    if not len(registry):
+        print("no agents registered")
+        return 0
+    failed = 0
+    for manifest in registry:
+        result = describe(manifest)
+        if result.ok:
+            caps = ", ".join(manifest.capability_names)
+            print(f"ok    {manifest.name}  ({caps})")
+        else:
+            failed += 1
+            detail = result.error.message if result.error else "unknown failure"
+            print(f"FAIL  {manifest.name}\n      {detail}", file=sys.stderr)
+    return 1 if failed else 0
+
+
+def _read_input(args: argparse.Namespace) -> dict:
+    # Reading stdin implicitly when no flag is given looks convenient and
+    # hangs forever the moment this runs anywhere without a terminal — a
+    # script, a cron job, CI. Stdin is only ever read when asked for by name.
+    if args.input_file == "-":
+        raw = sys.stdin.read()
+    elif args.input_file:
+        raw = Path(args.input_file).read_text(encoding="utf-8")
+    elif args.input:
+        raw = args.input
+    else:
+        raw = "{}"
+    payload = json.loads(raw or "{}")
+    if not isinstance(payload, dict):
+        raise json.JSONDecodeError("input must be a JSON object", raw, 0)
+    return payload
+
+
+def _emit(result) -> int:
+    print(json.dumps(result.to_wire(), indent=2))
+    return 0 if result.ok else 1
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="agents", description="Call the agents in this repo.")
+    parser.add_argument("--root", type=Path, default=None, help="repo root (default: auto-detect)")
+    sub = parser.add_subparsers(dest="command")
+
+    p_list = sub.add_parser("list", help="list registered agents")
+    p_list.add_argument("--json", action="store_true")
+
+    p_desc = sub.add_parser("describe", help="describe one agent")
+    p_desc.add_argument("agent")
+    p_desc.add_argument(
+        "--static",
+        action="store_true",
+        help="read the manifest without running the agent",
+    )
+
+    p_call = sub.add_parser("call", help="call a capability")
+    p_call.add_argument("agent")
+    p_call.add_argument("capability")
+    p_call.add_argument("--input", help="inline JSON object (default: {})")
+    p_call.add_argument("--input-file", help="path to a JSON object, or '-' for stdin")
+    p_call.add_argument("--request-id", default="")
+    p_call.add_argument("--deadline-ms", type=int, default=None)
+    p_call.add_argument("--timeout", type=float, default=None, help="hard kill after N seconds")
+
+    sub.add_parser("check", help="describe every agent; non-zero if any fails")
+    return parser
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
