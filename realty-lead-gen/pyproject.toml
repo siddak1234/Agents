@@ -210,6 +210,16 @@ runtime-evaluated-decorators = [
 # down and rebuild it against a different DSN. Scoped to the one file so
 # `global` anywhere else still fails the build.
 "src/realty_lead_gen/db.py" = ["PLW0603"]
+# The orchestrator adapter breaks two rules on purpose. PLC0415: its heavy
+# imports (anthropic client, settings) are deferred into the capability that
+# needs them so `describe` answers from a bare environment — that is a
+# protocol requirement (see CLAUDE.md), and hoisting them would break it.
+# PLR0911: `_dispatch` validates the wire request field by field and returns
+# a typed error envelope at each check; the return count is the shape of the
+# protocol, and folding the returns into nested conditionals would obscure
+# exactly the part that must stay obvious. Scoped to the one file so both
+# rules still guard ordinary modules.
+"src/realty_lead_gen/agentcall.py" = ["PLC0415", "PLR0911"]
 
 [tool.ruff.format]
 quote-style = "double"

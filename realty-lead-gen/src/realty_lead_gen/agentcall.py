@@ -50,7 +50,7 @@ def main() -> int:
 
     try:
         envelope = _dispatch(sys.stdin.read())
-    except Exception as exc:  # noqa: BLE001 — last resort; an envelope is mandatory
+    except Exception as exc:  # last resort; an envelope is mandatory
         traceback.print_exc(file=sys.stderr)
         envelope = _fail("", "internal", f"{type(exc).__name__}: {exc}")
     finally:
@@ -71,9 +71,7 @@ def _dispatch(raw: str) -> dict[str, Any]:
         return _fail("", "invalid_request", "request must be a JSON object")
 
     if request.get("protocol") != PROTOCOL:
-        return _fail(
-            "", "invalid_request", f"unsupported protocol {request.get('protocol')!r}"
-        )
+        return _fail("", "invalid_request", f"unsupported protocol {request.get('protocol')!r}")
 
     capability = request.get("capability")
     if not isinstance(capability, str):
@@ -137,7 +135,7 @@ def _grade_photos(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = asyncio.run(PhotoGrader(claude, settings).grade(urls, market_hint=market_hint))
-    except Exception as exc:  # noqa: BLE001 — surface as a typed error, not a crash
+    except Exception as exc:  # surface as a typed error, not a crash
         traceback.print_exc(file=sys.stderr)
         return _fail(cap, "internal", f"{type(exc).__name__}: {exc}")
 
@@ -177,9 +175,7 @@ def _ok(
     }
 
 
-def _fail(
-    capability: str, etype: str, message: str, *, retryable: bool = False
-) -> dict[str, Any]:
+def _fail(capability: str, etype: str, message: str, *, retryable: bool = False) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL,
         "ok": False,
