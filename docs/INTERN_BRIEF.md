@@ -30,7 +30,62 @@ uv run agents list          # should print the agents that already exist
 
 If that last command prints a list, you are ready.
 
-## Part 2 — Create your folder
+## Part 2 — Decide what your agent is
+
+**This is your job, and it is the hard part.** Nobody is going to hand you a
+scope. Most of what the review board sends back is decided here, before a
+line of code exists — the worked failure at the end of this page failed on
+*design*, not on code that didn't work.
+
+Answer these seven, in writing, before you scaffold anything. Do not move on
+while an answer is still vague; a vague answer here becomes a blocking
+finding later.
+
+1. **Why should this exist?** What is true after it runs that was not true
+   before? If your answer is "it calls the X API" — that is *how*, not *why*.
+   Keep going.
+2. **Who calls it, and what do they do with the result?** This decides your
+   output shape more than anything else.
+3. **What does it do, as capabilities?** Name each for what it *achieves*,
+   not how it is implemented. Two traps, and the board checks for both: one
+   capability that does four things, and four capabilities that are always
+   called together.
+4. **For each capability, what goes in and what comes out?** Concrete fields,
+   units, formats. "A location" is not an answer. "Latitude and longitude in
+   decimal degrees" is.
+5. **What can go wrong?** Sort each failure now: the caller's fault
+   (`invalid_request`), a missing dependency (`unavailable`), or transient
+   (`timeout`). This is your error taxonomy and it is easier to decide up
+   front than to retrofit.
+6. **What credentials or configuration does it need?** Name the exact
+   environment variables. Anything you cannot justify against a specific
+   capability does not belong in `runtime.env.inherit`.
+7. **Does it call a model?** If so you also need structured output through a
+   tool schema, graceful degradation when the key is absent, and usage
+   reported. Decide that now, not later.
+
+Then write two or three sentences of prose describing the purpose, plus the
+capability list. **That paragraph becomes your `description`** — it is how a
+human, and later a router, picks your agent out of a list.
+
+### Stop and rethink if any of these is true
+
+- The purpose is still "it calls the X API". An agent that is a thin wrapper
+  around one endpoint is a function, not an agent.
+- One capability does everything. If its description needs the word "or"
+  three times, it is several capabilities wearing a coat.
+- Something already in this repo does this. Run `uv run agents list` and
+  read the descriptions. If an existing agent owns this ground, the right
+  contribution is usually a **capability added to that agent**, not a new
+  one. If you still think it should stand alone, be ready to say why the two
+  data models can safely diverge.
+- You cannot say what a caller does with the output. Then you do not yet
+  know what the output should be.
+
+A good agent is one someone else could pick out of `agents list` and call
+correctly without asking you a question.
+
+## Part 3 — Create your folder
 
 ```bash
 uv run agents new my-agent    # use your agent's real name, lowercase-with-hyphens
@@ -42,7 +97,7 @@ registers it, and adds it to the README table. It deliberately does **not**
 write your description, your capabilities, or a LICENSE — those are the
 decisions that make it an agent instead of a copy.
 
-## Part 3 — Build it
+## Part 4 — Build it
 
 ```bash
 uv run agents verify
@@ -55,7 +110,7 @@ prints is your to-do list.** When it prints `All 7 gates pass`, you are done.
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.
 
-## Part 4 — Open the pull request
+## Part 5 — Open the pull request
 
 ```bash
 git add -A && git commit -m "Add my-agent"
@@ -67,7 +122,7 @@ checklist in the PR template.
 
 ---
 
-## Part 5 — The contract (this is the part to paste into Claude)
+## Part 6 — The contract (this is the part to paste into Claude)
 
 Everything below defines what a correct agent looks like here. Paste from
 here to the end of the page.
@@ -261,12 +316,25 @@ agent stand on its own, or is it a feature of something already here?
 
 ## Ask Claude this
 
-After pasting the above, describe your agent:
+Paste Part 6 above, then your own Part 2 answers:
 
-> Using the contract above, build me an agent called `<name>` that `<what it
-> does>`. It should offer these capabilities: `<list them>`. Give me
-> `agent.yaml`, `agent_main.py`, the logic module, the README, and the tests
-> as complete files. Follow all six rules. Do not put business logic in
+> Using the contract above, build the agent I have scoped below.
+>
+> **Purpose:** <your two or three sentences — why it exists, who calls it,
+> what they do with the result>
+> **Name:** `<lowercase-with-hyphens>`
+> **Capabilities:** <each one, with its inputs and outputs — concrete fields,
+> units and formats>
+> **Failure modes:** <which are invalid_request, which unavailable, which
+> timeout>
+> **Environment:** <the exact variables, or none>
+>
+> Give me `agent.yaml`, `agent_main.py`, the logic module, the README and the
+> tests as complete files. Follow all six rules. Keep business logic out of
 > `agent_main.py`.
+
+If you cannot fill in that template, go back to Part 2 — the gap is in the
+design, and Claude writing code around a gap will produce something that
+compiles and fails review.
 
 Then save each file into your folder and run `uv run agents verify`.
