@@ -17,7 +17,12 @@ from pathlib import Path
 import pytest
 
 from orchestrator.cli import main
-from orchestrator.discovery import TODO_MARKER, integration_problems, load_registry
+from orchestrator.discovery import (
+    TODO_MARKER,
+    _has_readme_row,
+    integration_problems,
+    load_registry,
+)
 
 TEMPLATE_MANIFEST = """\
 protocol: agentcall/v1
@@ -236,6 +241,57 @@ def test_a_lightly_edited_template_description_is_caught(tmp_path: Path) -> None
         )
         problems = "\n".join(integration_problems(load_registry(root)))
         assert "description is still the template's" in problems, f"{edited!r} slipped through"
+
+
+def test_the_template_sentence_padded_with_filler_is_still_caught(tmp_path: Path) -> None:
+    """Ratio alone was diluted by length, so padding beat it.
+
+    `SequenceMatcher.ratio()` divides by combined length: keeping the template
+    sentence verbatim and appending two lines of unrelated prose scored 0.38
+    and passed — an easier evasion than the one-character edit the ratio was
+    added to catch.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    manifest = agent / "agent.yaml"
+    template_sentence = "Template agent — copy this folder to start a new one."
+    padded = (
+        f"{template_sentence} This agent processes real estate leads and grades "
+        f"photos for condition, and does a great deal of other useful work."
+    )
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "Forecasts and severe-weather alerts for a coordinate.", padded
+        ),
+        encoding="utf-8",
+    )
+    assert any(
+        "description is still the template's" in p
+        for p in integration_problems(load_registry(root))
+    )
+
+
+def test_a_row_for_a_different_agent_does_not_satisfy_a_substring_name(
+    tmp_path: Path,
+) -> None:
+    """Narrowing to `|` rows kept a substring test, so `gen` matched `lead-gen`.
+
+    Any agent whose name is contained in an existing agent's name would never
+    need a row of its own.
+    """
+    root = _repo(tmp_path)
+    _finished(root, "parcel-geo")
+    (root / "README.md").write_text(
+        "# Agents\n\n| Agent |\n|---|\n| [`parcel-geo`](./parcel-geo) |\n", encoding="utf-8"
+    )
+    assert integration_problems(load_registry(root)) == []
+
+    # A second agent whose name is a substring of the first must not be
+    # satisfied by the first's row.
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert _has_readme_row(readme, "parcel-geo")
+    assert not _has_readme_row(readme, "geo")
+    assert not _has_readme_row(readme, "parcel")
 
 
 def test_a_mention_outside_the_table_is_not_a_readme_row(tmp_path: Path) -> None:

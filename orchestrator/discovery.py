@@ -8,6 +8,7 @@ make something callable.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -203,6 +204,13 @@ def _too_close_to(description: str, template_description: str) -> bool:
     mine, theirs = _normalized(description), _normalized(template_description)
     if mine == theirs:
         return True
+    # Containment, checked before the ratio. `SequenceMatcher.ratio()` divides
+    # by combined length, so padding dilutes it: the template sentence kept
+    # verbatim and followed by two lines of unrelated prose scores 0.38 and
+    # sails through — an easier evasion than the one-character edit the ratio
+    # was added to catch. Keeping the sentence at all is the tell.
+    if theirs in mine:
+        return True
     return SequenceMatcher(None, mine, theirs).ratio() > MAX_TEMPLATE_SIMILARITY
 
 
@@ -210,10 +218,33 @@ def _has_readme_row(readme_text: str, name: str) -> bool:
     """Whether the agents table has a row for this agent.
 
     A bare substring search passed on any mention anywhere in the file —
-    including a sentence promising to document the agent later. The table is
-    the thing being asked for, so match a table row.
+    including a sentence promising to document the agent later. Narrowing that
+    to table rows was not enough on its own: still matching a substring meant
+    an agent called `gen` was satisfied by `realty-lead-gen`'s row, so any name
+    contained in an existing agent's name would never need a row of its own.
+
+    Match a whole cell instead, ignoring the markdown a row normally carries.
     """
-    return any(line.lstrip().startswith("|") and name in line for line in readme_text.splitlines())
+    for line in readme_text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        for cell in line.split("|"):
+            if _cell_names(cell) == name:
+                return True
+    return False
+
+
+def _cell_names(cell: str) -> str:
+    """A table cell reduced to the bare agent name it holds, if any.
+
+    Rows are written `| [`parcel-geo`](./parcel-geo) | active | … |`, so the
+    link, the backticks and the surrounding space all have to come off before
+    the comparison means anything.
+    """
+    text = cell.strip()
+    if match := re.fullmatch(r"\[(.*)\]\(.*\)", text):
+        text = match.group(1).strip()
+    return text.strip("`").strip()
 
 
 def _template_manifest(root: Path) -> AgentManifest | None:
