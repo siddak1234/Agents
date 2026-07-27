@@ -1,14 +1,40 @@
-name: CI
+# realty-lead-gen's pipeline, hosted at the repository root.
+#
+# This is the agent's own CI, moved here unchanged in substance. It has to
+# live at the root because GitHub Actions does not discover workflows nested
+# inside a directory, and it is scoped with `paths:` so it does not run when
+# an unrelated agent changes.
+#
+# Everything that differs from a standalone repo is a consequence of the
+# nesting, and each one is a silent failure if you forget it:
+#   * `defaults.run.working-directory` — applies to `run` steps only, never
+#     to `uses:` steps.
+#   * `cache-dependency-glob` — the action would otherwise key its cache off
+#     whichever lockfile it finds first in the monorepo.
+#   * artifact `path:` — resolved from the workspace root, NOT from
+#     `working-directory`, so these stay prefixed.
+
+name: realty-lead-gen
 
 on:
   push:
     branches: [main]
+    paths:
+      - "realty-lead-gen/**"
+      - ".github/workflows/realty-lead-gen.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "realty-lead-gen/**"
+      - ".github/workflows/realty-lead-gen.yml"
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: realty-lead-gen
 
 jobs:
   lint-and-unit:
@@ -20,6 +46,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          cache-dependency-glob: realty-lead-gen/uv.lock
       - name: Sync
         run: uv sync --all-extras --frozen
       # `scripts` is in scope here for the same reason `src` is: it holds
@@ -44,7 +71,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
-          path: .coverage.unit
+          path: realty-lead-gen/.coverage.unit
           include-hidden-files: true
           if-no-files-found: error
 
@@ -76,6 +103,7 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          cache-dependency-glob: realty-lead-gen/uv.lock
       - run: uv sync --all-extras --frozen
       - name: Apply migrations
         run: uv run alembic upgrade head
@@ -87,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-integration
-          path: .coverage.integration
+          path: realty-lead-gen/.coverage.integration
           include-hidden-files: true
           if-no-files-found: error
 
@@ -100,12 +128,16 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          cache-dependency-glob: realty-lead-gen/uv.lock
       - run: uv sync --all-extras --frozen
       - name: Download coverage data
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-*
           merge-multiple: true
+          # Resolved from the workspace root, so the files land next to the
+          # agent's pyproject.toml where `coverage combine` will find them.
+          path: realty-lead-gen
       # The two jobs measure disjoint halves of the codebase: the unit job
       # never reaches a route handler, the integration job never reaches a
       # scorer's edge cases. Judging either half against a whole-repo
@@ -121,5 +153,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
-          path: coverage.xml
+          path: realty-lead-gen/coverage.xml
           if-no-files-found: error

@@ -1,0 +1,52 @@
+# Hooks for root-owned code only — `orchestrator/`, `tests/`, `_template/`.
+#
+# Agent folders are excluded on purpose. Each agent owns its toolchain and its
+# standards the same way it owns its dependencies; running root's rules across
+# an agent would break the isolation the whole design rests on.
+# realty-lead-gen has its own .pre-commit-config.yaml, run from its folder.
+#
+#   uv run pre-commit install
+
+default_language_version:
+  python: python3.13
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+        # Every manifest and workflow in the repo — a malformed agent.yaml
+        # should fail here, not halfway through discovery.
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff-format
+        files: ^(orchestrator|tests|_template)/
+      - id: ruff
+        args: [--fix]
+        files: ^(orchestrator|tests|_template)/
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict, orchestrator)
+        entry: uv run --frozen mypy orchestrator
+        language: system
+        pass_filenames: false
+        files: ^orchestrator/
+
+      # Cheap and catches the mistake people actually make: adding an agent
+      # and forgetting to register it, or renaming a folder without renaming
+      # the manifest. No network, no credentials, no cost.
+      - id: agents-check
+        name: agents check
+        entry: uv run --frozen agents check
+        language: system
+        pass_filenames: false
+        files: ^(registry.yaml|orchestrator/|.*/agent\.yaml)$
