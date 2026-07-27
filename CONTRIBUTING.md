@@ -26,6 +26,18 @@ done at scale.
 
 ## Adding your agent
 
+```
+/new-agent a weather forecast agent for field crews
+```
+
+That interviews you first — why this should exist, who calls it, what the
+capabilities are, what goes in and out of each, what can go wrong, what
+credentials it needs — and only then scaffolds, writing your answers into
+`agent.yaml`. Most of what the review board later blocks on is decided in that
+conversation rather than in code.
+
+By hand instead:
+
 ```bash
 cp -r _template my-agent && cd my-agent
 ```

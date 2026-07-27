@@ -16,7 +16,7 @@ orchestrator knows about any agent.
 ├── _template/          a working agent to copy. Start here.
 ├── orchestrator/       discovery, manifests, transport, CLI
 ├── tests/              contract and template tests
-├── .claude/            reviewers and the /raise-pr command
+├── .claude/            skills, rules, hooks, reviewers, /raise-pr
 ├── docs/               roadmap and deeper notes
 ├── registry.yaml       which agents exist (paths only)
 └── <agent-name>/       one folder per agent, each with its own agent.yaml
@@ -95,9 +95,25 @@ agent would merge green and simply never be callable.
 
 ## Roadmap
 
-[`docs/CERTIFICATION_ROADMAP.md`](./docs/CERTIFICATION_ROADMAP.md) records
-what this repo teaches well, what it does not yet teach, and the order to
-close that in.
+[`docs/ROADMAP.md`](./docs/ROADMAP.md) is where this repository is going —
+the contribution funnel, the guidance surface, multi-tenancy, runtime,
+evaluation, and what is deliberately not being built yet.
+[`docs/CERTIFICATION_ROADMAP.md`](./docs/CERTIFICATION_ROADMAP.md) is one
+workstream of it in detail.
+
+## How the repository guides you
+
+Three mechanisms, each doing what only it can:
+
+| | Does |
+|---|---|
+| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding |
+| **Rules** (`.claude/rules/`) | Load automatically when you edit a manifest, an entrypoint, or shared code — contract reminders at the moment they apply |
+| **Hooks** (`.claude/settings.json`) | Edit a manifest and the integration gate runs; a half-finished agent is reported before you get further |
+| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check` — the same commands CI runs |
+
+Rules guide, hooks enforce. A rule is context you may act on; a hook exits
+non-zero and has to be dealt with.
 
 ## Licensing
 
