@@ -428,9 +428,26 @@ def test_usage_is_mandatory_not_merely_documented(bad):
         CallResult.decode(_envelope(usage=bad), capability="x")
 
 
-def test_a_non_integer_usage_field_is_rejected_rather_than_coerced():
-    with pytest.raises(ProtocolError, match="integers"):
-        CallResult.decode(_envelope(usage={"input_tokens": "many"}), capability="x")
+@pytest.mark.parametrize(
+    "value",
+    [
+        "many",
+        "5",  # a numeric string was silently coerced
+        1.5,
+        True,  # bool is an int subclass, so `int()` turned True into 1 token
+        None,
+        [],
+    ],
+)
+def test_a_non_integer_usage_field_is_rejected_rather_than_coerced(value):
+    with pytest.raises(ProtocolError, match="must be an integer"):
+        CallResult.decode(_envelope(usage={"input_tokens": value}), capability="x")
+
+
+def test_a_negative_usage_count_is_rejected():
+    """A negative count would quietly corrupt any total built on top of it."""
+    with pytest.raises(ProtocolError, match="must not be negative"):
+        CallResult.decode(_envelope(usage={"input_tokens": -1}), capability="x")
 
 
 def test_usage_may_report_zeros_when_nothing_was_spent():
