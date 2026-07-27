@@ -23,6 +23,14 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=512]
 
+  # This repository is public. realty-lead-gen has scanned itself since before
+  # the move; the root did not, which meant commits made from here — where
+  # everyone actually commits — were unscanned. Same pin as the agent uses.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.0
     hooks:
@@ -50,3 +58,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^(registry.yaml|orchestrator/|.*/agent\.yaml)$
+
+      # The integration gate, run before the commit rather than after the
+      # push. CI enforces it either way; the difference is whether a
+      # contributor finds out in two seconds or after waiting for a build.
+      - id: agents-integration
+        name: agents list --strict
+        entry: uv run --frozen agents list --strict
+        language: system
+        pass_filenames: false
+        files: ^(registry\.yaml|README\.md|orchestrator/|.*/agent\.yaml|.*/LICENSE|.*/README\.md)$
