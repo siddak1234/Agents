@@ -57,7 +57,16 @@ repos:
         entry: uv run --frozen agents check
         language: system
         pass_filenames: false
-        files: ^(registry.yaml|orchestrator/|.*/agent\.yaml)$
+        # The entrypoints belong here. `agents check` runs the agent and
+        # compares what `describe` reports against the manifest — and an
+        # 821-line edit to `agent_main.py` alone matched none of these
+        # patterns, so the one gate that actually executes the agent never
+        # ran locally. `registry.yaml` was also unescaped.
+        #
+        # One line on purpose: a folded scalar (`>-`) joins lines with a space,
+        # which lands inside the alternation and silently stops a branch from
+        # ever matching.
+        files: ^(registry\.yaml|orchestrator/|.*/agent\.yaml|.*/agent_main\.py|.*/agentcall\.py)$
 
       # The integration gate, run before the commit rather than after the
       # push. CI enforces it either way; the difference is whether a
@@ -67,4 +76,7 @@ repos:
         entry: uv run --frozen agents list --strict
         language: system
         pass_filenames: false
-        files: ^(registry\.yaml|README\.md|orchestrator/|.*/agent\.yaml|.*/LICENSE|.*/README\.md)$
+        # `--strict` now scans an agent's whole folder for TODO markers, not
+        # just its manifest, so an entrypoint or starter-test edit can change
+        # the answer too. One line — see the note on agents-check above.
+        files: ^(registry\.yaml|README\.md|orchestrator/|.*/agent\.yaml|.*/LICENSE|.*/README\.md|.*/agent_main\.py|.*/agentcall\.py)$

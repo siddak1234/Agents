@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from orchestrator.cli import main
-from orchestrator.discovery import integration_problems, load_registry
+from orchestrator.discovery import TODO_MARKER, integration_problems, load_registry
 
 TEMPLATE_MANIFEST = """\
 protocol: agentcall/v1
@@ -104,14 +104,25 @@ def test_a_finished_integration_passes(tmp_path: Path) -> None:
             capabilities:
               - name: describe
                 description: Report this agent's name and capabilities.
+                input_schema: { type: object, properties: {} }
+                output_schema: { type: object, required: [name] }
               - name: forecast
                 description: Seven-day forecast for a latitude and longitude.
+                input_schema: { type: object, required: [lat, lon] }
+                output_schema: { type: object, required: [days] }
             """),
         encoding="utf-8",
     )
     (root / "README.md").write_text(
         "# Agents\n\n| Agent |\n|---|\n| weather-agent |\n", encoding="utf-8"
     )
+    # The template plants markers outside the manifest too, and the folder is
+    # scanned whole — so finishing the integration means clearing all of them.
+    for path in agent.rglob("*"):
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            if TODO_MARKER in text:
+                path.write_text(text.replace(TODO_MARKER, "done"), encoding="utf-8")
 
     assert integration_problems(load_registry(root)) == []
 
@@ -134,4 +145,133 @@ def test_each_required_file_is_reported_by_name(
 def test_the_template_itself_is_never_checked(tmp_path: Path) -> None:
     """`_template` is unregistered by design, so its own TODOs are fine."""
     root = _repo(tmp_path)
+    assert integration_problems(load_registry(root)) == []
+
+
+def _finished(root: Path, name: str = "weather-agent") -> Path:
+    """An agent with every reported problem worked through."""
+    agent = _copy_template_as(root, name)
+    (agent / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    (agent / "agent.yaml").write_text(
+        textwrap.dedent(f"""\
+            protocol: agentcall/v1
+            name: {name}
+            description: Forecasts and severe-weather alerts for a coordinate.
+            runtime:
+              type: subprocess
+              command: ["python3", "agent_main.py"]
+              test: ["python3", "-c", "pass"]
+            capabilities:
+              - name: describe
+                description: Report this agent's name and capabilities.
+                input_schema: {{ type: object }}
+                output_schema: {{ type: object }}
+              - name: forecast
+                description: Seven-day forecast for a coordinate.
+                input_schema: {{ type: object }}
+                output_schema: {{ type: object }}
+            """),
+        encoding="utf-8",
+    )
+    (root / "README.md").write_text(f"# Agents\n\n| Agent |\n|---|\n| {name} |\n", encoding="utf-8")
+    return agent
+
+
+def test_a_todo_marker_outside_the_manifest_is_caught(tmp_path: Path) -> None:
+    """The manifest-only scan missed most of the template's own markers.
+
+    The template plants them in `agent_main.py`, its README and its starter
+    test as well, so a copy could clear `agent.yaml` alone and pass.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    assert integration_problems(load_registry(root)) == []
+
+    (agent / "agent_main.py").write_text(f"# {TODO_MARKER}: implement this\n", encoding="utf-8")
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert TODO_MARKER in problems
+    assert "agent_main.py" in problems, "the message must name the file to edit"
+
+
+def test_a_capability_without_schemas_is_caught(tmp_path: Path) -> None:
+    """A missing schema silently defaulted to `{}` and documented nothing."""
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    manifest = agent / "agent.yaml"
+    kept = [
+        line
+        for line in manifest.read_text(encoding="utf-8").splitlines(keepends=True)
+        if "input_schema" not in line
+    ]
+    manifest.write_text("".join(kept), encoding="utf-8")
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "declares no input_schema" in problems
+    assert "declares no output_schema" not in problems, "only the removed one should report"
+
+
+def test_a_lightly_edited_template_description_is_caught(tmp_path: Path) -> None:
+    """Exact-string comparison was defeated by changing one character."""
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    manifest = agent / "agent.yaml"
+    template_description = "Template agent — copy this folder to start a new one."
+
+    for edited in (
+        template_description,
+        template_description.replace(".", "!"),
+        template_description.upper(),
+        "  " + template_description + "  ",
+        template_description.replace("a new one", "a new one now"),
+    ):
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                manifest.read_text(encoding="utf-8").split("description: ")[1].split("\n")[0],
+                edited,
+            ),
+            encoding="utf-8",
+        )
+        problems = "\n".join(integration_problems(load_registry(root)))
+        assert "description is still the template's" in problems, f"{edited!r} slipped through"
+
+
+def test_a_mention_outside_the_table_is_not_a_readme_row(tmp_path: Path) -> None:
+    """A bare substring search passed on any mention anywhere in the file."""
+    root = _repo(tmp_path)
+    _finished(root)
+
+    (root / "README.md").write_text(
+        "# Agents\n\nSomeday weather-agent will be documented properly.\n", encoding="utf-8"
+    )
+    assert any(
+        "missing from the README.md agents table" in p
+        for p in integration_problems(load_registry(root))
+    )
+
+    (root / "README.md").write_text(
+        "# Agents\n\n| Agent |\n|---|\n| weather-agent |\n", encoding="utf-8"
+    )
+    assert integration_problems(load_registry(root)) == []
+
+
+def test_a_missing_template_is_reported_rather_than_skipping_checks(tmp_path: Path) -> None:
+    """Deleting `_template/` silently disabled two checks."""
+    root = _repo(tmp_path)
+    _finished(root)
+    assert integration_problems(load_registry(root)) == []
+
+    (root / "_template" / "agent.yaml").unlink()
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "_template/ is missing or unreadable" in problems
+
+
+def test_the_marker_scan_ignores_caches_and_virtualenvs(tmp_path: Path) -> None:
+    """An agent's `.venv` can hold thousands of files it did not write."""
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    for noise in (".venv/lib/thing.py", "__pycache__/x.py", "node_modules/y.js"):
+        path = agent / noise
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {TODO_MARKER}\n", encoding="utf-8")
+
     assert integration_problems(load_registry(root)) == []

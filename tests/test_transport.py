@@ -21,7 +21,7 @@ import pytest
 
 from orchestrator import runner as runner_mod
 from orchestrator.cli import main
-from orchestrator.contract import PROTOCOL, CallRequest, CallResult
+from orchestrator.contract import PROTOCOL, CallRequest, CallResult, ProtocolError
 from orchestrator.discovery import DiscoveryError, load_registry, unregistered_agent_dirs
 from orchestrator.manifest import AgentEnv, ManifestError
 from orchestrator.runner import BASE_ENV, build_env, call, describe
@@ -396,15 +396,44 @@ def test_underscore_folders_are_not_agents(stub):
     assert unregistered_agent_dirs(load_registry(stub.workdir.parent)) == []
 
 
+def _envelope(**overrides) -> str:
+    body = {
+        "protocol": PROTOCOL,
+        "ok": True,
+        "capability": "x",
+        "output": {"n": 1},
+        "usage": {"input_tokens": 5, "output_tokens": 6, "cost_micros": 7},
+        "error": None,
+    }
+    body.update(overrides)
+    return json.dumps({k: v for k, v in body.items() if v is not _OMIT})
+
+
+_OMIT = object()
+
+
 def test_envelope_survives_a_round_trip():
-    wire = json.dumps(
-        {
-            "protocol": PROTOCOL,
-            "ok": True,
-            "capability": "x",
-            "output": {"n": 1},
-            "usage": {"input_tokens": 5, "output_tokens": 6, "cost_micros": 7},
-            "error": None,
-        }
-    )
-    assert CallResult.decode(wire, capability="x").usage.input_tokens == 5
+    assert CallResult.decode(_envelope(), capability="x").usage.input_tokens == 5
+
+
+@pytest.mark.parametrize("bad", [_OMIT, None, 7, "none", []])
+def test_usage_is_mandatory_not_merely_documented(bad):
+    """AGENT_PROTOCOL.md says usage is always present. Now it is enforced.
+
+    A missing or non-object `usage` silently decoded as zeros, so an agent could
+    omit accounting entirely and its envelope still read as valid. Zeros an
+    agent declared and zeros the orchestrator invented are different claims.
+    """
+    with pytest.raises(ProtocolError, match="usage"):
+        CallResult.decode(_envelope(usage=bad), capability="x")
+
+
+def test_a_non_integer_usage_field_is_rejected_rather_than_coerced():
+    with pytest.raises(ProtocolError, match="integers"):
+        CallResult.decode(_envelope(usage={"input_tokens": "many"}), capability="x")
+
+
+def test_usage_may_report_zeros_when_nothing_was_spent():
+    """The whole point of mandatory accounting is that zero is a real answer."""
+    result = CallResult.decode(_envelope(usage={}), capability="x")
+    assert (result.usage.input_tokens, result.usage.cost_micros) == (0, 0)
