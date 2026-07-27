@@ -73,7 +73,17 @@ jobs:
           if [ -n "$OAUTH" ] || [ -n "$KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY — the review board did not run. Deterministic gates passed."
+            # Say which situation this is. A fork never receives secrets, so
+            # the board can never run there and no amount of configuration
+            # changes that — the maintainer reads the diff instead. On the
+            # base repository the same silence means the secret is simply
+            # missing. Identical wording for both would leave a maintainer
+            # unable to tell "unreviewable by design" from "misconfigured".
+            if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+              echo "::warning::Fork pull request — secrets are withheld, so the review board cannot run here. Deterministic gates passed. A human must read this diff before merging."
+            else
+              echo "::warning::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY — the review board did not run. Deterministic gates passed. Run \`claude setup-token\` and add the result as CLAUDE_CODE_OAUTH_TOKEN to turn the board on."
+            fi
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
