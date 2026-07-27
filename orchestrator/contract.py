@@ -27,6 +27,24 @@ class ProtocolError(Exception):
     """An agent returned something that is not a valid envelope."""
 
 
+def _usage_count(raw: dict[str, Any], field: str) -> int:
+    """One non-negative integer from a `usage` object.
+
+    `int()` was too generous here. It accepts a bool — `True` became 1 token —
+    and a numeric string, so an agent could report accounting in a type nobody
+    intended and have it silently coerced. Counts are also never negative, and
+    a negative one would quietly corrupt any total built on top of it.
+    """
+    value = raw.get(field, 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ProtocolError(
+            f"usage.{field} must be an integer, got {type(value).__name__} {value!r}"
+        )
+    if value < 0:
+        raise ProtocolError(f"usage.{field} must not be negative, got {value}")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Usage:
     """Resource accounting. Always present, zeroed when nothing was spent."""
@@ -55,14 +73,11 @@ class Usage:
                 f"usage must be an object, got {type(raw).__name__}. It is mandatory — "
                 f"report zeros when nothing was spent."
             )
-        try:
-            return cls(
-                input_tokens=int(raw.get("input_tokens") or 0),
-                output_tokens=int(raw.get("output_tokens") or 0),
-                cost_micros=int(raw.get("cost_micros") or 0),
-            )
-        except (TypeError, ValueError) as exc:
-            raise ProtocolError(f"usage fields must be integers: {exc}") from exc
+        return cls(
+            input_tokens=_usage_count(raw, "input_tokens"),
+            output_tokens=_usage_count(raw, "output_tokens"),
+            cost_micros=_usage_count(raw, "cost_micros"),
+        )
 
     def to_wire(self) -> dict[str, int]:
         return {
