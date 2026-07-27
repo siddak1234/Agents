@@ -44,10 +44,26 @@ class AgentEnv:
     database password because it was started by a process that had one.
     """
 
-    #: Names or fnmatch patterns inherited from the orchestrator's environment.
+    #: Exact names, or a literal prefix plus one trailing `*`. See
+    #: `_inherit_problem` for the rule and why it is shaped that way.
     inherit: tuple[str, ...] = ()
     #: Literal values. Never put a secret here — this file is committed.
     set: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        """Hold the inherit rule here as well as in the loader.
+
+        `_load_env` already rejects a bad pattern, and with a better message —
+        it knows which file the entry came from. This is the backstop: the
+        invariant is what stops an agent reading a credential it never
+        declared, and `build_env` consumes `inherit` far from where the loader
+        validated it. Enforcing it on the type means no future construction
+        path can skip it, which a check that lives only in the loader cannot
+        promise.
+        """
+        for pattern in self.inherit:
+            if problem := _inherit_problem(pattern):
+                raise ManifestError(f"runtime.env.inherit entry {pattern!r} {problem}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +173,56 @@ def _load_capabilities(raw: Any, path: Path) -> tuple[Capability, ...]:
     return tuple(out)
 
 
+#: Shortest literal prefix a wildcard entry may have. `A*` and `AB*` are not
+#: names, they are sweeps that happen to be spelled short. Three characters is
+#: where an entry starts describing a family instead.
+#:
+#: This threshold is not a safety guarantee and must not be read as one — see
+#: `_inherit_problem` for what the rule does and does not buy.
+MIN_INHERIT_PREFIX = 3
+
+
+def _inherit_problem(pattern: str) -> str | None:
+    """Why this entry may not be inherited, or None if it may.
+
+    `build_env` matches these with `fnmatch`, which understands `?` and `[…]`
+    as well as `*` — so rejecting the literal `"*"` alone left the door open.
+    `?*`, `**`, `*_*`, and `[A-Z]*` each pass an equality check and then match
+    essentially every variable the orchestrator holds. That is not a
+    hypothetical: all four hand an agent the whole environment, credentials
+    included, which is precisely what deny-by-default exists to prevent.
+
+    Rather than enumerate the ways to write "everything", allow only the two
+    shapes with an obvious meaning: an exact name, or a literal prefix with
+    one trailing `*`.
+
+    **What this does not do.** It rejects patterns that match approximately
+    everything. It cannot tell whether a well-formed prefix is *too broad for
+    this agent*: `AWS*` is three characters and legal here, and it reaches
+    `AWS_SECRET_ACCESS_KEY`. So are `DB_*`, `API*` and `JWT*`. Whether a
+    capability genuinely needs the family it names is a review question —
+    CONTRIBUTING.md lists `runtime.env.inherit` broader than the capabilities
+    justify as a blocking finding — and no character count decides it.
+    """
+    if any(char in pattern for char in "?[]"):
+        return "may not use '?' or '[…]'. Use an exact name, or a prefix ending in '*'."
+
+    stars = pattern.count("*")
+    if stars == 0:
+        return None
+    if stars > 1 or not pattern.endswith("*"):
+        return (
+            "may use at most one '*', as the last character. "
+            "Use an exact name, or a prefix ending in '*'."
+        )
+    if len(pattern) - 1 < MIN_INHERIT_PREFIX:
+        return (
+            f"needs at least {MIN_INHERIT_PREFIX} characters before the '*'. "
+            f"A prefix this short sweeps in variables you did not mean to name."
+        )
+    return None
+
+
 def _load_env(raw: Any, path: Path) -> AgentEnv:
     if raw is None:
         # Declaring nothing means inheriting nothing. Silence is the safe
@@ -168,12 +234,9 @@ def _load_env(raw: Any, path: Path) -> AgentEnv:
     inherit = raw.get("inherit", [])
     if not isinstance(inherit, list) or not all(isinstance(v, str) and v for v in inherit):
         raise ManifestError(f"{path}: runtime.env.inherit must be a list of names or patterns")
-    if "*" in inherit:
-        # The whole point is that this is impossible to do by accident.
-        raise ManifestError(
-            f"{path}: runtime.env.inherit may not be '*'. Name the variables this agent "
-            "actually needs; inheriting everything is what this setting exists to prevent."
-        )
+    for pattern in inherit:
+        if problem := _inherit_problem(pattern):
+            raise ManifestError(f"{path}: runtime.env.inherit entry {pattern!r} {problem}")
 
     assigned = raw.get("set", {})
     if not isinstance(assigned, dict) or not all(
