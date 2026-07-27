@@ -39,6 +39,7 @@ uv run agents describe <agent>                # handshake — free, no network
 uv run agents call <agent> <capability> --input '{"…": "…"}'
 uv run agents check                           # describe every agent
 uv run agents test                            # run each agent's own tests
+uv run agents lint                            # run each agent's own lint
 uv run agents new <name>                      # scaffold one from the template
 uv run agents verify                          # every gate CI runs, at once
 ```

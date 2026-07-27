@@ -74,6 +74,7 @@ rather than a copy, and `--strict` reporting them is the integration.
    uv run agents list --strict    # is it actually integrated?
    uv run agents check my-agent   # does it run and match its manifest?
    uv run agents test my-agent    # does its own test command pass?
+   uv run agents lint my-agent    # does its own lint command pass?
    uv run agents call my-agent <capability> --input '{...}'
    ```
 
@@ -92,6 +93,7 @@ rather than a copy, and `--strict` reporting them is the integration.
 | `README.md` | yes, enforced | What it does, how to run it, how to configure it |
 | `LICENSE` | yes, enforced | Licensing is per agent; state it explicitly |
 | tests | yes, enforced | Placement is yours; declare `runtime.test` so CI runs them |
+| lint config | yes, enforced | Declare `runtime.lint`; root tooling checks root-owned code only |
 | `CLAUDE.md` | if it has house rules | Conventions specific to your agent |
 | dependency manifest | if you have dependencies | `pyproject.toml` or equivalent |
 | `.gitignore` | if your toolchain needs one | Agent-specific ignores only |

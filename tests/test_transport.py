@@ -87,6 +87,7 @@ def stub(tmp_path: Path):
               type: subprocess
               command: ["{sys.executable}", "agent_main.py"]
               test: ["{sys.executable}", "-c", "pass"]
+              lint: ["{sys.executable}", "-c", "pass"]
               env:
                 inherit: [STUB_ALLOWED, STUB_PREFIXED_*]
             capabilities:
@@ -306,6 +307,25 @@ def test_runaway_stdout_is_capped(stub, monkeypatch):
 def test_agents_test_runs_the_declared_command_in_the_agent_folder(stub, capsys):
     assert main(["--root", str(stub.workdir.parent), "test"]) == 0
     assert "ok    stub-agent" in capsys.readouterr().out
+
+
+def test_agents_lint_runs_the_declared_command(stub, capsys):
+    """Root tooling covers root-owned code only, so this is the only thing
+    that checks a contributed agent's source."""
+    assert main(["--root", str(stub.workdir.parent), "lint"]) == 0
+    assert "ok    stub-agent" in capsys.readouterr().out
+
+
+def test_an_agent_declaring_no_lint_command_fails(stub, capsys):
+    manifest = stub.workdir / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            f'  lint: ["{sys.executable}", "-c", "pass"]\n', ""
+        ),
+        encoding="utf-8",
+    )
+    assert main(["--root", str(stub.workdir.parent), "lint"]) == 1
+    assert "declares no runtime.lint" in capsys.readouterr().err
 
 
 def test_an_agent_declaring_no_test_command_fails(stub, capsys):

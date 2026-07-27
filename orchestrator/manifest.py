@@ -79,6 +79,11 @@ class AgentManifest:
     #: assuming a language, and an agent whose tests nothing can run is an
     #: agent whose tests nobody runs.
     test: tuple[str, ...] = ()
+    #: How the agent checks its own source — lint, format, types. Same
+    #: reasoning as `test`, and the same evidence: root tooling covers
+    #: root-owned code only, so an agent's code was checked by nothing unless
+    #: someone hand-wrote a pipeline for it. Exactly one agent had.
+    lint: tuple[str, ...] = ()
 
     def capability(self, name: str) -> Capability | None:
         return next((c for c in self.capabilities if c.name == name), None)
@@ -123,9 +128,8 @@ def load(agent_dir: Path) -> AgentManifest:
     if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
         raise ManifestError(f"{path}: runtime.command must be a non-empty list of strings")
 
-    test = runtime.get("test", [])
-    if not isinstance(test, list) or not all(isinstance(c, str) for c in test):
-        raise ManifestError(f"{path}: runtime.test must be a list of strings")
+    test = _load_command(runtime, "test", path)
+    lint = _load_command(runtime, "lint", path)
 
     capabilities = _load_capabilities(raw.get("capabilities"), path)
     if not any(c.name == DESCRIBE for c in capabilities):
@@ -138,7 +142,8 @@ def load(agent_dir: Path) -> AgentManifest:
         description=description,
         command=tuple(command),
         env=_load_env(runtime.get("env"), path),
-        test=tuple(test),
+        test=test,
+        lint=lint,
         # Always the manifest's own directory. Not configurable: this is what
         # makes an agent's relative paths (.env, alembic.ini) resolve, and a
         # configurable cwd is a configurable way to get that silently wrong.
@@ -221,6 +226,14 @@ def _inherit_problem(pattern: str) -> str | None:
             f"A prefix this short sweeps in variables you did not mean to name."
         )
     return None
+
+
+def _load_command(runtime: dict[str, Any], field: str, path: Path) -> tuple[str, ...]:
+    """One optional `runtime.<field>` command list. Empty when absent."""
+    value = runtime.get(field, [])
+    if not isinstance(value, list) or not all(isinstance(c, str) for c in value):
+        raise ManifestError(f"{path}: runtime.{field} must be a list of strings")
+    return tuple(value)
 
 
 def _load_env(raw: Any, path: Path) -> AgentEnv:

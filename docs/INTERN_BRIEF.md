@@ -141,9 +141,9 @@ uv run agents verify
 
 Run this whenever you want to know where you stand. It runs every check CI
 runs and prints all of them at once. **It will fail at first, and the list it
-prints is your to-do list.** When it prints `All 7 gates pass`, you are done.
+prints is your to-do list.** When it prints `All 8 gates pass`, you are done.
 
-The seven, so you know what is being asked of you:
+The eight, so you know what is being asked of you:
 
 | Gate | Asks |
 |---|---|
@@ -153,9 +153,10 @@ The seven, so you know what is being asked of you:
 | `pytest` | Do the contract and template tests still pass? |
 | `agents list --strict` | Registered *and* integrated — LICENSE, README row, no TODO markers, your own description and capabilities |
 | `agents check` | Does your agent run, and do its `describe` capability names match `agent.yaml`? |
+| `agents lint` | Does your own declared lint command pass? Root tooling does not check your code. |
 | `agents test` | Does your own declared test command pass, from your folder? |
 
-The last three are about your agent. The first four are about the repository,
+The last four are about your agent. The first four are about the repository,
 and should already pass — if one of them breaks, you changed something
 outside your folder.
 
@@ -299,6 +300,7 @@ runtime:
   type: subprocess
   command: ["python3", "agent_main.py"]
   test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["python3", "-m", "compileall", "-q", "."]   # replace with real linting
   env:
     inherit: []           # name only what a capability actually reads
 
