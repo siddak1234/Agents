@@ -42,10 +42,17 @@ Everything needing a change is marked `TODO(new agent)`.
 5. **Verify.**
 
    ```bash
-   uv run agents check
+   uv run agents list --strict    # is it actually integrated?
+   uv run agents check my-agent   # does it run and match its manifest?
    uv run agents call my-agent <capability> --input '{...}'
    uv run pytest
    ```
+
+   `--strict` is the one to run first. A renamed copy of the template passes
+   everything else — it loads, it answers, its manifest is valid — while still
+   describing itself as a template and offering only the example capability.
+   `--strict` is what tells *registered* from *integrated*, and working
+   through what it reports is the integration.
 
 ## What your folder must contain
 
@@ -53,12 +60,21 @@ Everything needing a change is marked `TODO(new agent)`.
 |---|---|---|
 | `agent.yaml` | yes | Manifest — how to run you, what you offer, what you may read |
 | entrypoint | yes | Implements `agentcall/v1` on stdin/stdout |
-| `README.md` | yes | What it does, how to run it, how to configure it |
+| `README.md` | yes, enforced | What it does, how to run it, how to configure it |
+| `LICENSE` | yes, enforced | Licensing is per agent; state it explicitly |
+| tests | yes | Placement is yours — `tests/` by convention |
 | `CLAUDE.md` | if it has house rules | Conventions specific to your agent |
-| `tests/` | yes | Your own tests, run by your own command |
 | dependency manifest | if you have dependencies | `pyproject.toml` or equivalent |
 | `.gitignore` | if your toolchain needs one | Agent-specific ignores only |
-| `LICENSE` | yes | Licensing is per agent; state it explicitly |
+
+**The template ships no `LICENSE` on purpose.** One that did would have you
+inherit a licence by accident, which is the thing per-agent licensing exists
+to prevent. `--strict` will tell you to add it.
+
+Test placement is not enforced, because it cannot be without assuming your
+language. Note that your tests run in CI only once your agent has its own
+workflow — `.github/workflows/realty-lead-gen.yml` is the worked example.
+Until then they are yours to run.
 
 Your folder should still make sense if someone copied it out of this repo and
 ran it alone. Depend on the orchestrator for nothing.

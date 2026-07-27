@@ -22,8 +22,8 @@ from orchestrator.contract import DESCRIBE, CallRequest, CallResult
 from orchestrator.discovery import (
     DiscoveryError,
     Registry,
+    integration_problems,
     load_registry,
-    unregistered_agent_dirs,
 )
 from orchestrator.runner import call, describe
 
@@ -52,15 +52,15 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
     if args.strict:
-        orphans = unregistered_agent_dirs(registry)
-        if orphans:
-            for name in orphans:
-                print(
-                    f"error: {name}/ contains an agent.yaml but is not in registry.yaml.\n"
-                    f"       Add `- path: {name}` to registry.yaml, or the agent is "
-                    f"never callable.",
-                    file=sys.stderr,
-                )
+        problems = integration_problems(registry)
+        if problems:
+            for problem in problems:
+                print(f"error: {problem}", file=sys.stderr)
+            print(
+                f"\n{len(problems)} problem(s). An agent that loads is not yet an "
+                f"agent that is integrated.",
+                file=sys.stderr,
+            )
             return 1
 
     if args.json:

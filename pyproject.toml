@@ -64,7 +64,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests assert, spawn stub agents, and compare against literal values on
 # purpose; naming every expected number would obscure what is being asserted.
-"tests/*" = ["S101", "S603", "S607", "PLR2004"]
+# `**` so the template's own starter tests are covered too — they are the
+# example a contributor copies, and they spawn the agent deliberately.
+"**/tests/*" = ["S101", "S603", "S607", "PLR2004"]
 
 [tool.mypy]
 python_version = "3.13"

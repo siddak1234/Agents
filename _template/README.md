@@ -20,6 +20,12 @@ echo '{"protocol":"agentcall/v1","capability":"greet","input":{"name":"Dak"}}' \
 That it answers with the orchestrator uninvolved is the point, not a
 convenience. Agents do not depend on the orchestrator.
 
+Run the starter tests, also with no install:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
 ## Making it yours
 
 ```bash
@@ -30,6 +36,16 @@ Search the copy for `TODO(new agent)` — every spot needing a change is
 marked. [`CONTRIBUTING.md`](../CONTRIBUTING.md) has the full checklist and
 the rules reviewers apply; `agent_main.py` marks the four contract rules
 inline as `RULE`, at the line where each is easy to break.
+
+Then run `uv run agents list --strict` from the repository root. It rejects a
+copy that has been renamed but not yet made into an agent — a description
+still saying "template", only the example capability, leftover
+`TODO(new agent)` markers, no `LICENSE`, or no row in the root README table.
+Working through what it reports *is* the integration.
+
+**There is deliberately no `LICENSE` here.** Licensing is per agent, and a
+template that shipped one would have you inherit a licence by accident. The
+strict check will tell you to add it; choose consciously.
 
 ## Bringing your own dependencies
 

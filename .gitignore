@@ -34,6 +34,20 @@
 Thumbs.db
 desktop.ini
 
+# iCloud and Dropbox conflict copies — "orchestrator 2.yml" beside
+# "orchestrator.yml". This is not hypothetical: a synced copy of a workflow
+# file once reached CI, and because it declared the same workflow name the
+# two runs shared a concurrency group and cancelled each other. The failure
+# looked like a flaky pipeline, not a stray file.
+#
+# Narrow on purpose — a single space, digits, then an extension. A file you
+# genuinely meant to commit will not match unless it is named like a
+# conflict copy, and `git add -f` still works if one somehow is.
+* [0-9].*
+* [0-9][0-9].*
+* copy.*
+* copy [0-9].*
+
 # --- Editors / IDEs ----------------------------------------------------
 .vscode/
 .idea/
