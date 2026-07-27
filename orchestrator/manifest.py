@@ -58,6 +58,11 @@ class AgentManifest:
     workdir: Path
     capabilities: tuple[Capability, ...]
     env: AgentEnv = AgentEnv()
+    #: How the agent tests itself, run from its own folder. Declared rather
+    #: than discovered because test placement cannot be inferred without
+    #: assuming a language, and an agent whose tests nothing can run is an
+    #: agent whose tests nobody runs.
+    test: tuple[str, ...] = ()
 
     def capability(self, name: str) -> Capability | None:
         return next((c for c in self.capabilities if c.name == name), None)
@@ -102,6 +107,10 @@ def load(agent_dir: Path) -> AgentManifest:
     if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
         raise ManifestError(f"{path}: runtime.command must be a non-empty list of strings")
 
+    test = runtime.get("test", [])
+    if not isinstance(test, list) or not all(isinstance(c, str) for c in test):
+        raise ManifestError(f"{path}: runtime.test must be a list of strings")
+
     capabilities = _load_capabilities(raw.get("capabilities"), path)
     if not any(c.name == DESCRIBE for c in capabilities):
         # Cheap to declare, and it is the only capability the orchestrator can
@@ -113,6 +122,7 @@ def load(agent_dir: Path) -> AgentManifest:
         description=description,
         command=tuple(command),
         env=_load_env(runtime.get("env"), path),
+        test=tuple(test),
         # Always the manifest's own directory. Not configurable: this is what
         # makes an agent's relative paths (.env, alembic.ini) resolve, and a
         # configurable cwd is a configurable way to get that silently wrong.

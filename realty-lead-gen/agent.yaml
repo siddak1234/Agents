@@ -19,6 +19,15 @@ runtime:
   # configurable here.
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
 
+  # Unit tests only: the integration suite needs Postgres and Redis, and
+  # this command has to be runnable by anyone, anywhere, with no services.
+  #
+  # `--extra dev` is what carries pytest. The command must stand up on a
+  # machine that has only ever run `uv sync --frozen` here, because that is
+  # what CI does before calling it — leave it off and the orchestrator reports
+  # a test failure that is really a missing interpreter dependency.
+  test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-m", "unit", "-q"]
+
   # Least privilege: this agent sees only what is named here, plus the base
   # variables every process needs (PATH, HOME, ...). Everything else in the
   # orchestrator's environment is withheld.

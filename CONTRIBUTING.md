@@ -74,7 +74,7 @@ Everything needing a change is marked `TODO(new agent)`.
 | entrypoint | yes | Implements `agentcall/v1` on stdin/stdout |
 | `README.md` | yes, enforced | What it does, how to run it, how to configure it |
 | `LICENSE` | yes, enforced | Licensing is per agent; state it explicitly |
-| tests | yes | Placement is yours — `tests/` by convention |
+| tests | yes, enforced | Placement is yours; declare `runtime.test` so CI runs them |
 | `CLAUDE.md` | if it has house rules | Conventions specific to your agent |
 | dependency manifest | if you have dependencies | `pyproject.toml` or equivalent |
 | `.gitignore` | if your toolchain needs one | Agent-specific ignores only |
@@ -83,10 +83,11 @@ Everything needing a change is marked `TODO(new agent)`.
 inherit a licence by accident, which is the thing per-agent licensing exists
 to prevent. `--strict` will tell you to add it.
 
-Test placement is not enforced, because it cannot be without assuming your
-language. Note that your tests run in CI only once your agent has its own
-workflow — `.github/workflows/realty-lead-gen.yml` is the worked example.
-Until then they are yours to run.
+Test placement is not enforced — that cannot be done without assuming your
+language. Instead your manifest declares `runtime.test`, the command that runs
+them from your folder, and CI runs it for every agent a pull request touches.
+An agent that declares none fails `--strict`: tests nothing can run are tests
+nobody runs.
 
 Your folder should still make sense if someone copied it out of this repo and
 ran it alone. Depend on the orchestrator for nothing.
@@ -122,6 +123,9 @@ That runs the deterministic gates, then puts your branch in front of the
 them blocks, it opens the pull request and carries their advisory notes into
 the description. If any blocks, no pull request is opened and you get the
 findings with the file and the fix.
+
+`/raise-pr` runs in your own Claude Code session, on your own subscription —
+there is nothing to configure and no key involved.
 
 The same four reviewers run again in CI on the pull request, and *that* run is
 what branch protection enforces. `/raise-pr` is the fast path — a minute

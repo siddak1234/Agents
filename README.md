@@ -38,6 +38,7 @@ uv run agents list                            # what is here
 uv run agents describe <agent>                # handshake — free, no network
 uv run agents call <agent> <capability> --input '{"…": "…"}'
 uv run agents check                           # describe every agent
+uv run agents test                            # run each agent's own tests
 ```
 
 Every call runs the agent as a subprocess **in its own folder, with its own
@@ -75,11 +76,13 @@ is scoped with a `paths:` filter.
 |---|---|---|
 | `orchestrator.yml` | every change | ruff, strict mypy, registry validation, contract and template tests, then `agents check` |
 | `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy, unit tests, integration against real Postgres and Redis, coverage gate |
-| `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Needs an `ANTHROPIC_API_KEY` secret; warns and skips without one |
+| `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Authenticates with `CLAUDE_CODE_OAUTH_TOKEN` (your Claude subscription, via `claude setup-token`) or `ANTHROPIC_API_KEY`; warns and skips with neither |
 
-`agents check` is the integration gate worth understanding: it calls
-`describe` on an agent — no network, no credentials, no cost — and catches a
-broken entrypoint or a manifest that no longer matches its code.
+`agents check` calls `describe` on an agent — no network, no credentials, no
+cost — and compares what the agent reports against its manifest. A capability
+declared and not implemented, or implemented and not declared, fails here.
+`agents test` then runs the agent's own declared test command in its own
+folder, so a contributed agent's tests actually execute.
 
 **It is scoped to what changed.** A pull request adding one agent builds and
 describes that agent only; it does not build every other agent, and it cannot

@@ -37,7 +37,9 @@ sys.stdout = sys.stderr
 req = json.loads(sys.stdin.read() or "{}")
 cap = req.get("capability", "")
 if cap == "describe":
-    e = env(True, cap, {"name": "stub-agent", "protocol": P, "capabilities": []})
+    # Must mirror the manifest exactly — `agents check` compares the two.
+    e = env(True, cap, {"name": "stub-agent", "protocol": P,
+                        "capabilities": [{"name": n, "description": n} for n in __CAPS__]})
 elif cap == "echo":
     e = env(True, cap, {"echoed": req.get("input", {})})
 elif cap == "where":
@@ -71,7 +73,9 @@ CAPS = ["describe", "echo", "where", "environment", "flood", "leak_stdout", "cra
 def stub(tmp_path: Path):
     agent = tmp_path / "stub-agent"
     agent.mkdir()
-    (agent / "agent_main.py").write_text(STUB, encoding="utf-8")
+    (agent / "agent_main.py").write_text(
+        STUB.replace("__CAPS__", json.dumps(CAPS)), encoding="utf-8"
+    )
     caps = "\n".join(f"  - name: {c}\n    description: {c}" for c in CAPS)
     (agent / "agent.yaml").write_text(
         textwrap.dedent(f"""\
@@ -81,6 +85,7 @@ def stub(tmp_path: Path):
             runtime:
               type: subprocess
               command: ["{sys.executable}", "agent_main.py"]
+              test: ["{sys.executable}", "-c", "pass"]
               env:
                 inherit: [STUB_ALLOWED, STUB_PREFIXED_*]
             capabilities:
@@ -218,6 +223,55 @@ def test_runaway_stdout_is_capped(stub, monkeypatch):
     result = call(stub, CallRequest(capability="flood", input={"bytes": 50_000}))
     assert result.error.type == "transport"
     assert "over the" in result.error.message and "limit" in result.error.message
+
+
+def test_agents_test_runs_the_declared_command_in_the_agent_folder(stub, capsys):
+    assert main(["--root", str(stub.workdir.parent), "test"]) == 0
+    assert "ok    stub-agent" in capsys.readouterr().out
+
+
+def test_an_agent_declaring_no_test_command_fails(stub, capsys):
+    """Tests nothing can run are tests nobody runs."""
+    manifest = stub.workdir / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            f'  test: ["{sys.executable}", "-c", "pass"]\n', ""
+        ),
+        encoding="utf-8",
+    )
+    assert main(["--root", str(stub.workdir.parent), "test"]) == 1
+    assert "declares no runtime.test" in capsys.readouterr().err
+
+
+def test_the_test_command_gets_the_same_environment_a_call_gets(stub, monkeypatch):
+    """Deny by default has to cover `agents test`, not just `agents call`.
+
+    A test command is arbitrary contributed code, run on a maintainer's machine
+    and in CI where the real secrets are. Handing it `os.environ` wholesale —
+    which is what a bare `subprocess.run` does — is a wider grant than the
+    agent gets when it is actually called.
+    """
+    monkeypatch.setenv("ORCHESTRATOR_SECRET", "do-not-leak")
+    monkeypatch.setenv("STUB_ALLOWED", "declared")
+
+    probe = stub.workdir / "probe.py"
+    probe.write_text(
+        "import os, sys\n"
+        "sys.exit(7 if 'ORCHESTRATOR_SECRET' in os.environ else\n"
+        "         0 if os.environ.get('STUB_ALLOWED') == 'declared' else 8)\n",
+        encoding="utf-8",
+    )
+    manifest = stub.workdir / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            f'  test: ["{sys.executable}", "-c", "pass"]',
+            f'  test: ["{sys.executable}", "probe.py"]',
+        ),
+        encoding="utf-8",
+    )
+
+    # 7 = the undeclared secret reached it; 8 = the declared one did not.
+    assert main(["--root", str(stub.workdir.parent), "test"]) == 0
 
 
 def test_check_can_be_scoped_to_named_agents(stub, capsys):

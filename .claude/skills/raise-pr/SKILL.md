@@ -1,8 +1,8 @@
 ---
-description: Run the review board on this branch and open a pull request only if it passes
+name: raise-pr
+description: Run the review board on this branch and open a pull request only if it passes. Use when someone wants to raise, open or submit a pull request for an agent they have built.
 argument-hint: [pull request title]
 allowed-tools: Bash, Read, Grep, Glob, Agent
-model: opus
 ---
 
 ## Context
@@ -32,14 +32,16 @@ uv run ruff check orchestrator tests _template
 uv run mypy orchestrator
 uv run pytest -q
 uv run agents check
+uv run agents test
 ```
 
 If any fail: print the output, say what to fix, and **stop without calling the
 board.** There is no sense paying an architect to review a branch that does
 not lint, and the failures are usually the same ones the board would restate.
 
-If the change touches an agent that has its own test command, run that too —
-`realty-lead-gen` is the example.
+`agents test` runs each agent's own declared `runtime.test` command from its
+own folder, so a contributed agent's tests run here too — there is nothing
+extra to remember for the agent you just built.
 
 ### 3. The review board
 
@@ -78,7 +80,10 @@ Finish by printing the pull request URL.
 
 ## Note
 
-This command is the fast path, not the gate. The same four reviewers run
-again in CI on the pull request, and that run is what branch protection
-enforces. Running them here means finding out in a minute rather than after a
-push — it does not mean CI will agree if the branch changes afterwards.
+This skill is the fast path, not the gate. The same four reviewers run again
+in CI on the pull request, and that run is what branch protection enforces.
+Running them here means finding out in a minute rather than after a push — it
+does not mean CI will agree if the branch changes afterwards.
+
+It runs in your own Claude Code session on your own subscription: no API key,
+nothing to configure.
