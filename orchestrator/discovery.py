@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import yaml
@@ -88,17 +89,40 @@ def integration_problems(registry: Registry) -> list[str]:
                 f"nothing runs its tests — not CI, not a reviewer, not you."
             )
 
-        if TODO_MARKER in (manifest.workdir / MANIFEST_NAME).read_text(encoding="utf-8"):
+        # The whole folder, not just the manifest. The template plants markers
+        # in `agent_main.py`, `README.md` and its starter test as well, so a
+        # manifest-only scan passed a copy with most of its TODOs untouched.
+        if marked := _files_with_marker(manifest.workdir):
             problems.append(
-                f"{where}: still has `{TODO_MARKER}` markers. Work through them, "
-                f"then delete the comment."
+                f"{manifest.name}: still has `{TODO_MARKER}` markers in "
+                f"{', '.join(marked)}. Work through them, then delete the comment."
             )
 
-        if template is not None:
-            if manifest.description.strip() == template.description.strip():
+        problems.extend(
+            f"{where}: capability '{capability.name}' declares no {field}. "
+            f"The schemas are how a caller learns to invoke you — an empty one "
+            f"documents nothing."
+            for capability in manifest.capabilities
+            for field, schema in (
+                ("input_schema", capability.input_schema),
+                ("output_schema", capability.output_schema),
+            )
+            if not schema
+        )
+
+        if template is None:
+            problems.append(
+                f"{TEMPLATE_DIR}/ is missing or unreadable, so '{manifest.name}' "
+                f"could not be compared against it. Two checks — description and "
+                f"capabilities still being the template's — silently do not run "
+                f"without it."
+            )
+        else:
+            if _too_close_to(manifest.description, template.description):
                 problems.append(
-                    f"{where}: description is still the template's. It is what a "
-                    f"human — and later a router — picks this agent by."
+                    f"{where}: description is still the template's, or a light "
+                    f"edit of it. It is what a human — and later a router — picks "
+                    f"this agent by."
                 )
             if set(manifest.capability_names) == set(template.capability_names):
                 problems.append(
@@ -107,13 +131,83 @@ def integration_problems(registry: Registry) -> list[str]:
                     f"what this agent actually does."
                 )
 
-        if manifest.name not in readme_text:
+        if not _has_readme_row(readme_text, manifest.name):
             problems.append(
                 f"{manifest.name}: missing from the README.md agents table. "
                 f"The registry is machine-readable; the table is how people find it."
             )
 
     return problems
+
+
+#: Directories never worth scanning for markers: build output, caches, and
+#: virtualenvs, any of which can hold thousands of files an agent did not write.
+SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hypothesis",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "venv",
+    }
+)
+
+#: Files above this are data, not source someone left a marker in.
+MAX_SCANNED_BYTES = 1024 * 1024
+
+#: How similar a description may be to the template's before it stops counting
+#: as the contributor's own. Exact-match comparison was defeated by editing one
+#: character, which is not the same as writing a description.
+MAX_TEMPLATE_SIMILARITY = 0.8
+
+
+def _files_with_marker(workdir: Path) -> list[str]:
+    """Paths under `workdir`, relative, still carrying the TODO marker."""
+    found = []
+    for path in sorted(workdir.rglob("*")):
+        if not path.is_file() or SKIP_DIRS & set(path.relative_to(workdir).parts):
+            continue
+        try:
+            if path.stat().st_size > MAX_SCANNED_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # Binary, unreadable, or a broken symlink. Not our business, and
+            # not a reason to fail the whole integration check.
+            continue
+        if TODO_MARKER in text:
+            found.append(str(path.relative_to(workdir)))
+    return found
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _too_close_to(description: str, template_description: str) -> bool:
+    """Whether a description is the template's, allowing for a light edit."""
+    if TODO_MARKER in description:
+        return True
+    mine, theirs = _normalized(description), _normalized(template_description)
+    if mine == theirs:
+        return True
+    return SequenceMatcher(None, mine, theirs).ratio() > MAX_TEMPLATE_SIMILARITY
+
+
+def _has_readme_row(readme_text: str, name: str) -> bool:
+    """Whether the agents table has a row for this agent.
+
+    A bare substring search passed on any mention anywhere in the file —
+    including a sentence promising to document the agent later. The table is
+    the thing being asked for, so match a table row.
+    """
+    return any(line.lstrip().startswith("|") and name in line for line in readme_text.splitlines())
 
 
 def _template_manifest(root: Path) -> AgentManifest | None:
@@ -140,7 +234,7 @@ def unregistered_agent_dirs(registry: Registry) -> list[str]:
         for path in registry.root.iterdir()
         if path.is_dir()
         and not path.name.startswith((".", "_"))
-        and (path / "agent.yaml").is_file()
+        and (path / MANIFEST_NAME).is_file()
         and path.name not in registry.agents
     )
 

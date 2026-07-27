@@ -227,7 +227,7 @@ def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
         # point of a handshake: a capability declared and not implemented is a
         # caller's runtime error, and one implemented and not declared is
         # outside the contract.
-        drift = _capability_drift(manifest, result.output)
+        drift = _describe_drift(manifest, result.output)
         if drift:
             failed += 1
             print(f"FAIL  {manifest.name}\n      {drift}", file=sys.stderr)
@@ -352,7 +352,7 @@ def _verify_check(registry: Registry, args: argparse.Namespace) -> tuple[str, st
         result = describe(manifest)
         if not result.ok:
             failures.append(f"{manifest.name}: {result.error.message if result.error else '?'}")
-        elif drift := _capability_drift(manifest, result.output):
+        elif drift := _describe_drift(manifest, result.output):
             failures.append(f"{manifest.name}: {drift}")
     return ("FAIL", "\n".join(failures)) if failures else ("ok", "")
 
@@ -384,23 +384,36 @@ def _verify_scope(registry: Registry, args: argparse.Namespace) -> list[AgentMan
     return [registry.get(n) for n in args.agents if n in registry.agents]
 
 
-def _capability_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:
+def _describe_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:
     """Compare `describe`'s answer with the manifest. None when they agree."""
+    reported_name = (output or {}).get("name")
+    parts = []
+
+    # The name is declared twice — `agent.yaml` and the entrypoint's own
+    # constant — and discovery only checks the manifest against its folder.
+    # Nothing noticed the third copy drifting, so an agent could answer under a
+    # different name than the one it is registered and called by.
+    if reported_name != manifest.name:
+        parts.append(
+            f"describe reports name {reported_name!r} but the manifest and folder "
+            f"say {manifest.name!r}; the name is declared in both agent.yaml and "
+            f"the entrypoint and they have drifted"
+        )
+
     raw = (output or {}).get("capabilities")
     if not isinstance(raw, list):
-        return "describe did not report a capabilities list, so the manifest cannot be verified"
+        parts.append(
+            "describe did not report a capabilities list, so the manifest cannot be verified"
+        )
+        return "; ".join(parts)
 
     reported = {c["name"] for c in raw if isinstance(c, dict) and isinstance(c.get("name"), str)}
     declared = set(manifest.capability_names)
-    if reported == declared:
-        return None
-
-    parts = []
     if missing := sorted(declared - reported):
         parts.append(f"declared in agent.yaml but not implemented: {', '.join(missing)}")
     if extra := sorted(reported - declared):
         parts.append(f"implemented but not declared in agent.yaml: {', '.join(extra)}")
-    return "; ".join(parts)
+    return "; ".join(parts) or None
 
 
 def _read_input(args: argparse.Namespace) -> dict[str, Any]:

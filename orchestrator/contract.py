@@ -37,13 +37,32 @@ class Usage:
 
     @classmethod
     def from_wire(cls, raw: Any) -> Usage:
+        """Decode `usage`, requiring it to be present.
+
+        AGENT_PROTOCOL.md says usage is always present, zeroed when nothing was
+        spent — but this silently returned zeros for a missing or non-object
+        `usage`, so "always present" was prose and nothing else. An agent could
+        omit it entirely and its envelope still decoded as valid.
+
+        Zeros an agent *declared* and zeros the orchestrator *invented* are
+        different claims, and the whole point of mandatory accounting is that
+        the second one is not available. Cost aggregation across agents is on
+        the roadmap and would have been built on a field that was optional in
+        practice.
+        """
         if not isinstance(raw, dict):
-            return cls()
-        return cls(
-            input_tokens=int(raw.get("input_tokens") or 0),
-            output_tokens=int(raw.get("output_tokens") or 0),
-            cost_micros=int(raw.get("cost_micros") or 0),
-        )
+            raise ProtocolError(
+                f"usage must be an object, got {type(raw).__name__}. It is mandatory — "
+                f"report zeros when nothing was spent."
+            )
+        try:
+            return cls(
+                input_tokens=int(raw.get("input_tokens") or 0),
+                output_tokens=int(raw.get("output_tokens") or 0),
+                cost_micros=int(raw.get("cost_micros") or 0),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ProtocolError(f"usage fields must be integers: {exc}") from exc
 
     def to_wire(self) -> dict[str, int]:
         return {
