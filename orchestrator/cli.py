@@ -28,6 +28,7 @@ from orchestrator.discovery import (
 )
 from orchestrator.manifest import AgentManifest
 from orchestrator.runner import build_env, call, describe
+from orchestrator.scaffold import ScaffoldError, create_agent
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,8 +50,34 @@ def main(argv: list[str] | None = None) -> int:
         "call": _cmd_call,
         "check": _cmd_check,
         "test": _cmd_test,
+        "new": _cmd_new,
+        "verify": _cmd_verify,
     }
     return handlers[args.command](registry, args)
+
+
+def _cmd_new(registry: Registry, args: argparse.Namespace) -> int:
+    """Scaffold an agent folder, registered but deliberately not finished."""
+    try:
+        done = create_agent(registry.root, args.name)
+    except ScaffoldError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    for step in done:
+        print(f"  {step}")
+    print(
+        f"\nNext, in {args.name}/:\n"
+        f"  1. agent.yaml — write the description and your real capabilities,\n"
+        f"     with input and output schemas, then delete the TODO markers.\n"
+        f"  2. agent_main.py — implement them. Keep `describe`.\n"
+        f"  3. Add a LICENSE. It is deliberately not copied: licensing is per\n"
+        f"     agent and choosing one should be a decision, not an inheritance.\n"
+        f"  4. Replace the README and the tests with your own.\n\n"
+        f"Then run `agents verify`. It will still fail, and what it reports is\n"
+        f"the list of things that make this an agent rather than a copy."
+    )
+    return 0
 
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
@@ -251,6 +278,112 @@ def _cmd_test(registry: Registry, args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+#: What `verify` runs, in the order CI runs it. Each entry is a label and the
+#: arguments after `python -m`. Invoked through `sys.executable` rather than a
+#: bare command name so it works without `uv` on PATH and cannot pick up a
+#: different interpreter's tools by accident.
+_TOOL_STEPS = (
+    ("ruff format", ("ruff", "format", "--check", "orchestrator", "tests", "_template")),
+    ("ruff check", ("ruff", "check", "orchestrator", "tests", "_template")),
+    ("mypy", ("mypy", "orchestrator")),
+    ("pytest", ("pytest", "-q")),
+)
+
+
+def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
+    """Run every gate CI runs, report all of them, exit non-zero if any failed.
+
+    Deliberately does not stop at the first failure. A contributor working
+    through their first agent wants the whole list — often one root cause
+    shows up as three of these — and a single block of output is something
+    they can paste somewhere and ask about.
+    """
+    results: list[tuple[str, str, str]] = []
+
+    for label, argv in _TOOL_STEPS:
+        completed = subprocess.run(  # noqa: S603 — fixed argv, no user input
+            [sys.executable, "-m", *argv],
+            cwd=registry.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # A tool that is not installed is not a failing gate — it is a gate
+        # that did not run, and saying "FAIL" for it would send someone
+        # looking for a defect in their agent.
+        if completed.returncode != 0 and f"No module named {argv[0]}" in completed.stderr:
+            results.append((label, "SKIP", f"{argv[0]} is not installed here"))
+            continue
+        output = (completed.stdout + completed.stderr).strip()
+        results.append((label, "ok" if completed.returncode == 0 else "FAIL", output))
+
+    for label, handler in (
+        ("agents list --strict", _verify_strict),
+        ("agents check", _verify_check),
+        ("agents test", _verify_test),
+    ):
+        results.append((label, *handler(registry, args)))
+
+    failed = [r for r in results if r[1] == "FAIL"]
+    for label, status, output in results:
+        print(f"{status:<4}  {label}")
+        if status == "FAIL" and output:
+            print("\n".join(f"        {line}" for line in output.splitlines()[:40]))
+
+    if failed:
+        print(
+            f"\n{len(failed)} of {len(results)} gates failed. These are the same "
+            f"checks CI runs, so fixing them here is fixing the build.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"\nAll {len(results)} gates pass.")
+    return 0
+
+
+def _verify_strict(registry: Registry, args: argparse.Namespace) -> tuple[str, str]:
+    problems = integration_problems(registry)
+    return ("FAIL", "\n".join(problems)) if problems else ("ok", "")
+
+
+def _verify_check(registry: Registry, args: argparse.Namespace) -> tuple[str, str]:
+    failures = []
+    for manifest in _verify_scope(registry, args):
+        result = describe(manifest)
+        if not result.ok:
+            failures.append(f"{manifest.name}: {result.error.message if result.error else '?'}")
+        elif drift := _capability_drift(manifest, result.output):
+            failures.append(f"{manifest.name}: {drift}")
+    return ("FAIL", "\n".join(failures)) if failures else ("ok", "")
+
+
+def _verify_test(registry: Registry, args: argparse.Namespace) -> tuple[str, str]:
+    failures = []
+    for manifest in _verify_scope(registry, args):
+        if not manifest.test:
+            failures.append(f"{manifest.name}: declares no runtime.test")
+            continue
+        completed = subprocess.run(  # noqa: S603 — command comes from a repo-controlled manifest
+            list(manifest.test),
+            cwd=manifest.workdir,
+            env=build_env(manifest),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            tail = (completed.stdout + completed.stderr).strip().splitlines()[-20:]
+            failures.append(f"{manifest.name}: exit {completed.returncode}\n" + "\n".join(tail))
+    return ("FAIL", "\n".join(failures)) if failures else ("ok", "")
+
+
+def _verify_scope(registry: Registry, args: argparse.Namespace) -> list[AgentManifest]:
+    """Named agents, or all of them. An unknown name is caught by `check`."""
+    if not args.agents:
+        return list(registry)
+    return [registry.get(n) for n in args.agents if n in registry.agents]
+
+
 def _capability_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:
     """Compare `describe`'s answer with the manifest. None when they agree."""
     raw = (output or {}).get("capabilities")
@@ -337,6 +470,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     p_test.add_argument(
         "agents", nargs="*", help="agent names to test. Omit to test every registered agent."
+    )
+
+    p_new = sub.add_parser("new", help="scaffold a new agent folder from the template")
+    p_new.add_argument("name", help="folder and agent name, e.g. parcel-geo")
+
+    p_verify = sub.add_parser(
+        "verify", help="run every gate CI runs and report all of them at once"
+    )
+    p_verify.add_argument(
+        "agents",
+        nargs="*",
+        help="agent names to check and test. Omit to cover every registered agent.",
     )
     return parser
 
