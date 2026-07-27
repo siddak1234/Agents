@@ -73,14 +73,19 @@ The two traps it exists to avoid, both easy to reintroduce:
 - `describe` must answer without importing `anthropic`, SQLAlchemy, or
   settings, so keep those imports inside the capability that needs them.
 
-## CI is currently dormant
+## This agent's CI lives at the repository root
 
-`.github/workflows/ci.yml` here is a complete pipeline — lint, typecheck,
+`.github/workflows/realty-lead-gen.yml`, scoped with a `paths:` filter on
+`realty-lead-gen/**`. There is no workflow inside this folder — GitHub
+Actions only discovers workflows at the *repository* root, so one here would
+never run, and a pipeline that silently never runs is worse than none.
+
+It is this agent's own pipeline, unchanged in substance: ruff, strict mypy,
 unit tests, integration against real Postgres and Redis, and a combined
-coverage gate. GitHub Actions only discovers workflows at the *repository*
-root, so nested one level down it does not run.
+coverage gate reading `fail_under` from this folder's `pyproject.toml`.
 
-It is intentionally left unmodified so this folder stays self-contained.
-Activating it means a root-level `.github/workflows/realty-lead-gen-ci.yml`
-with a `paths:` filter on `realty-lead-gen/**` and the working directory,
-uv cache glob, and artifact paths adjusted for the nested location.
+The workflow sets `defaults.run.working-directory: realty-lead-gen`, so
+`run:` steps behave as if launched from here. Two things do **not** follow
+that setting and stay root-prefixed — artifact `path:` values and the uv
+`cache-dependency-glob`. Both are silent failures if you forget them when
+editing.

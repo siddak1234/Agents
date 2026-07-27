@@ -92,7 +92,10 @@ working repository whose practices happen to be the exam's subject matter. If
 it stops being a real repo in order to teach, it teaches nothing worth
 knowing.
 
-## Prerequisite, unrelated to any domain
+## Prerequisite — met
 
-CI must actually run. Until then nothing here is enforced, and a teaching
-repo where bad practice produces no failure teaches bad practice.
+CI runs. `orchestrator.yml` gates every change on ruff, strict mypy, registry
+validation, the contract and template suites, and `agents check`;
+`realty-lead-gen.yml` gates that agent on its own pipeline. Every practice
+this repo teaches now fails a build when broken, which is the difference
+between a repo that documents standards and one that holds them.
