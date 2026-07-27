@@ -107,6 +107,7 @@ description: One line, for humans and for routing.
 runtime:
   type: subprocess
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
+  test: ["uv", "run", "--frozen", "pytest", "-m", "unit", "-q"]   # CI runs this
   env:
     inherit: [ANTHROPIC_API_KEY, ANTHROPIC_MODEL_*]   # names or fnmatch patterns
     set: { LOG_FORMAT: json }                         # literals, never secrets

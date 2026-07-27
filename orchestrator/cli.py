@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,8 @@ from orchestrator.discovery import (
     integration_problems,
     load_registry,
 )
-from orchestrator.runner import call, describe
+from orchestrator.manifest import AgentManifest
+from orchestrator.runner import build_env, call, describe
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         "describe": _cmd_describe,
         "call": _cmd_call,
         "check": _cmd_check,
+        "test": _cmd_test,
     }
     return handlers[args.command](registry, args)
 
@@ -185,14 +188,86 @@ def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
     failed = 0
     for manifest in selected:
         result = describe(manifest)
-        if result.ok:
-            caps = ", ".join(manifest.capability_names)
-            print(f"ok    {manifest.name}  ({caps})")
-        else:
+        if not result.ok:
             failed += 1
             detail = result.error.message if result.error else "unknown failure"
             print(f"FAIL  {manifest.name}\n      {detail}", file=sys.stderr)
+            continue
+
+        # The agent ran — but does it offer what it advertises? Printing the
+        # manifest's list here would restate the file we just read and prove
+        # nothing. Comparing it against what the agent reported is the whole
+        # point of a handshake: a capability declared and not implemented is a
+        # caller's runtime error, and one implemented and not declared is
+        # outside the contract.
+        drift = _capability_drift(manifest, result.output)
+        if drift:
+            failed += 1
+            print(f"FAIL  {manifest.name}\n      {drift}", file=sys.stderr)
+            continue
+
+        print(f"ok    {manifest.name}  ({', '.join(manifest.capability_names)})")
     return 1 if failed else 0
+
+
+def _cmd_test(registry: Registry, args: argparse.Namespace) -> int:
+    """Run each agent's own test command, in its own folder.
+
+    The orchestrator does not know how to test an agent and should not guess —
+    it runs what the manifest declares. Without this nothing runs a
+    contributed agent's tests: the root suite tests the orchestrator against a
+    stub, and CI only knows about pipelines that already exist.
+    """
+    try:
+        selected = [registry.get(n) for n in args.agents] if args.agents else list(registry)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    failed = 0
+    for manifest in selected:
+        if not manifest.test:
+            failed += 1
+            print(f"FAIL  {manifest.name}: declares no runtime.test", file=sys.stderr)
+            continue
+        print(f"---- {manifest.name}: {' '.join(manifest.test)}", flush=True)
+        completed = subprocess.run(  # noqa: S603 — command comes from a repo-controlled manifest
+            list(manifest.test),
+            cwd=manifest.workdir,
+            # The same allow-list a call gets. A test command is arbitrary code
+            # from a contributor, run on a maintainer's machine and in CI where
+            # the real secrets live, so it is the last place to widen the
+            # environment. It also stops the orchestrator's own VIRTUAL_ENV
+            # bleeding through and pointing the agent's tooling at the wrong
+            # interpreter.
+            env=build_env(manifest),
+            check=False,
+        )
+        if completed.returncode != 0:
+            failed += 1
+            print(f"FAIL  {manifest.name}: exit {completed.returncode}", file=sys.stderr)
+        else:
+            print(f"ok    {manifest.name}")
+    return 1 if failed else 0
+
+
+def _capability_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:
+    """Compare `describe`'s answer with the manifest. None when they agree."""
+    raw = (output or {}).get("capabilities")
+    if not isinstance(raw, list):
+        return "describe did not report a capabilities list, so the manifest cannot be verified"
+
+    reported = {c["name"] for c in raw if isinstance(c, dict) and isinstance(c.get("name"), str)}
+    declared = set(manifest.capability_names)
+    if reported == declared:
+        return None
+
+    parts = []
+    if missing := sorted(declared - reported):
+        parts.append(f"declared in agent.yaml but not implemented: {', '.join(missing)}")
+    if extra := sorted(reported - declared):
+        parts.append(f"implemented but not declared in agent.yaml: {', '.join(extra)}")
+    return "; ".join(parts)
 
 
 def _read_input(args: argparse.Namespace) -> dict[str, Any]:
@@ -255,6 +330,13 @@ def _parser() -> argparse.ArgumentParser:
         "agents",
         nargs="*",
         help="agent names to check. Omit to check every registered agent.",
+    )
+
+    p_test = sub.add_parser(
+        "test", help="run each agent's own declared test command, in its own folder"
+    )
+    p_test.add_argument(
+        "agents", nargs="*", help="agent names to test. Omit to test every registered agent."
     )
     return parser
 

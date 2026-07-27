@@ -54,17 +54,26 @@ jobs:
           uv run mypy orchestrator
           uv run pytest -q
 
-      # A missing key must not turn every pull request red — including on
-      # forks, which never receive secrets. Warn and skip instead.
+      # Two ways to authenticate, and the first needs no API key at all:
+      #
+      #   CLAUDE_CODE_OAUTH_TOKEN — generated from a Claude Pro/Max
+      #     subscription with `claude setup-token` run locally. The board then
+      #     runs on the subscription you already pay for.
+      #   ANTHROPIC_API_KEY — billed per token against an API account.
+      #
+      # Neither set is not an error. Forks never receive secrets, and a repo
+      # that has not configured the board yet should still get its
+      # deterministic gates rather than a red cross nobody can act on.
       - name: Is the board configured?
         id: cfg
         env:
           KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          if [ -n "$KEY" ]; then
+          if [ -n "$OAUTH" ] || [ -n "$KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::ANTHROPIC_API_KEY is not set — the review board did not run. Deterministic gates passed."
+            echo "::warning::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY — the review board did not run. Deterministic gates passed."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -72,6 +81,8 @@ jobs:
         if: steps.cfg.outputs.ready == 'true'
         uses: anthropics/claude-code-action@v1
         with:
+          # Both inputs are optional; whichever secret is set is the one used.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: "--max-turns 30"
           prompt: |

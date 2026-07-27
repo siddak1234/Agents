@@ -68,6 +68,7 @@ def test_a_renamed_template_is_not_an_integrated_agent(tmp_path: Path) -> None:
     problems = "\n".join(integration_problems(load_registry(root)))
 
     assert "no LICENSE" in problems
+    assert "no runtime.test" in problems
     assert "TODO(new agent)" in problems
     assert "description is still the template's" in problems
     assert "only the template's example capabilities" in problems
@@ -99,6 +100,7 @@ def test_a_finished_integration_passes(tmp_path: Path) -> None:
             runtime:
               type: subprocess
               command: ["python3", "agent_main.py"]
+              test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
             capabilities:
               - name: describe
                 description: Report this agent's name and capabilities.

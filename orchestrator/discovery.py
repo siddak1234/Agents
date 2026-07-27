@@ -82,6 +82,12 @@ def integration_problems(registry: Registry) -> list[str]:
             if not (manifest.workdir / required).is_file()
         )
 
+        if not manifest.test:
+            problems.append(
+                f"{where}: no runtime.test. Declare how this agent tests itself, or "
+                f"nothing runs its tests — not CI, not a reviewer, not you."
+            )
+
         if TODO_MARKER in (manifest.workdir / MANIFEST_NAME).read_text(encoding="utf-8"):
             problems.append(
                 f"{where}: still has `{TODO_MARKER}` markers. Work through them, "

@@ -166,3 +166,15 @@ jobs:
       - name: Describe them
         if: steps.scope.outputs.mode != 'none'
         run: uv run agents check ${{ steps.scope.outputs.agents }}
+
+      # Each agent declares its own test command; this runs it in the agent's
+      # folder. Without it a contributed agent's tests never execute anywhere:
+      # the root suite tests the orchestrator against a stub, and only agents
+      # with a hand-written pipeline of their own were ever covered.
+      #
+      # The command must install whatever it needs — the step above syncs an
+      # agent's default dependencies only, so a test command that assumes a
+      # dev extra was already installed fails here and nowhere else.
+      - name: Run their own tests
+        if: steps.scope.outputs.mode != 'none'
+        run: uv run agents test ${{ steps.scope.outputs.agents }}

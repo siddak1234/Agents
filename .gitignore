@@ -78,8 +78,13 @@ __pycache__/
 node_modules/
 
 # --- Virtualenvs -------------------------------------------------------
-.venv/
-venv/
+# No trailing slash: on a machine where the working copy sits in a synced
+# folder (iCloud, Dropbox), the cure is to point .venv at a real directory
+# elsewhere via a symlink. `.venv/` matches only a directory, so the symlink
+# is not ignored and gets committed — an absolute path into someone's home
+# directory that breaks the moment anyone else clones.
+.venv
+venv
 
 # --- Scratch -----------------------------------------------------------
 # Root-anchored: a nested tmp/ may be legitimate fixture data.
