@@ -1,11 +1,24 @@
 # Building your agent
 
 You are going to add one agent to this repository. This page is everything
-you need, and it is written to be **pasted into a Claude conversation** as
-your first message, followed by what you want your agent to do.
+you need. Parts 1 to 5 are for you to follow; **Part 6 is the part you paste
+into a Claude conversation**, along with your own answers from Part 2. There
+is a ready-made prompt at the end.
 
 If you are using Claude Code instead, you do not need this — run
 `/new-agent` and it will interview you.
+
+This file is self-contained on purpose. You can read it on GitHub, or grab it
+without cloning anything:
+
+```bash
+curl -O https://raw.githubusercontent.com/siddak1234/Agents/main/docs/INTERN_BRIEF.md
+```
+
+Two agents have been built from this page alone, by someone who had never
+seen the repository and was not allowed to read any other file in it. Both
+passed every gate on the first run. If something here is not enough, that is
+a bug in this page — say so.
 
 ---
 
@@ -70,8 +83,9 @@ human, and later a router, picks your agent out of a list.
 
 ### Stop and rethink if any of these is true
 
-- The purpose is still "it calls the X API". An agent that is a thin wrapper
-  around one endpoint is a function, not an agent.
+- The purpose is still "it calls the X API". Forwarding a request to one
+  endpoint and returning its response is a wrapper, not an agent — there is
+  no decision in it that the caller could not have made.
 - One capability does everything. If its description needs the word "or"
   three times, it is several capabilities wearing a coat.
 - Something already in this repo does this. Run `uv run agents list` and
@@ -82,8 +96,30 @@ human, and later a router, picks your agent out of a list.
 - You cannot say what a caller does with the output. Then you do not yet
   know what the output should be.
 
+### "Isn't this just a function?"
+
+Small and deterministic is fine — an agent does not have to call a model, and
+some of the best ones here do not. The question is not size, it is whether
+the thing is **worth calling by name from somewhere else**:
+
+- Does it own knowledge or rules that the caller should not have to carry?
+  A table of unit conversions, an address normalisation standard, a boundary
+  file — that is knowledge, and centralising it means one place to correct.
+- Does it have failure modes worth naming? If every input either works or is
+  invalid, and nothing can be unavailable or slow, it may genuinely be a
+  library function.
+- Would two different callers want the same answer? If only your code will
+  ever call it, it belongs in your code.
+
+One yes is enough. A unit converter with a real conversion table qualifies; a
+function that adds two numbers does not.
+
 A good agent is one someone else could pick out of `agents list` and call
 correctly without asking you a question.
+
+**If you have not done Part 1 yet**, you cannot run `agents list` and cannot
+do the duplicate check. Do Part 1 first — it is two minutes, and skipping it
+is how two people build the same agent.
 
 ## Part 3 — Create your folder
 
@@ -107,6 +143,22 @@ Run this whenever you want to know where you stand. It runs every check CI
 runs and prints all of them at once. **It will fail at first, and the list it
 prints is your to-do list.** When it prints `All 7 gates pass`, you are done.
 
+The seven, so you know what is being asked of you:
+
+| Gate | Asks |
+|---|---|
+| `ruff format` | Is repository-owned code formatted? |
+| `ruff check` | Is it lint-clean? |
+| `mypy` | Does the orchestrator still type-check? |
+| `pytest` | Do the contract and template tests still pass? |
+| `agents list --strict` | Registered *and* integrated — LICENSE, README row, no TODO markers, your own description and capabilities |
+| `agents check` | Does your agent run, and do its `describe` capability names match `agent.yaml`? |
+| `agents test` | Does your own declared test command pass, from your folder? |
+
+The last three are about your agent. The first four are about the repository,
+and should already pass — if one of them breaks, you changed something
+outside your folder.
+
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.
 
@@ -125,7 +177,7 @@ checklist in the PR template.
 ## Part 6 — The contract (this is the part to paste into Claude)
 
 Everything below defines what a correct agent looks like here. Paste from
-here to the end of the page.
+this heading to the end of the page — the closing prompt is part of it.
 
 ### What an agent is
 
@@ -167,13 +219,28 @@ Failure envelope out, on stdout:
 
 There are exactly five error types. Do not invent a sixth.
 
-| Type | Means |
-|---|---|
-| `invalid_request` | The caller sent something wrong. |
-| `unavailable` | A dependency is absent or down — a missing credential, an unreachable database. |
-| `timeout` | It took too long. |
-| `internal` | It broke in a way it did not anticipate. |
-| `transport` | **Orchestrator-side only. Your agent never emits this.** |
+| Type | Means | `retryable` |
+|---|---|---|
+| `invalid_request` | Unknown capability, malformed input, wrong protocol — anything the caller got wrong. | `false` |
+| `unavailable` | A dependency is absent or down — a missing credential, an unreachable database. | `false` if it is configuration, `true` if transient |
+| `timeout` | The agent gave up inside its deadline. | `true` |
+| `internal` | It broke in a way it did not anticipate. | `false` |
+| `transport` | **Orchestrator-side only. Your agent never emits this.** | — |
+
+`retryable` is not a judgement call — read it off that table. It tells a
+caller whether trying again could possibly help.
+
+**All of these are `invalid_request`**, and the skeleton below handles every
+one — do not remove any of them: stdin that is not valid JSON, a request that
+is not a JSON object, a `protocol` that is not `agentcall/v1`, a missing or
+non-string `capability`, an `input` that is not an object, and an unknown
+capability. Your own field validation is on top of these, not instead.
+
+`capability` is always present and always a string. Send `""` whenever the
+request could not be parsed far enough to trust it — unreadable JSON, not an
+object, or a `protocol` that is not ours. In that last case the field may
+well be there and readable, but a request in an unknown protocol is not one
+whose fields you should be echoing back.
 
 ### The six rules that get broken
 
@@ -183,7 +250,7 @@ board blocks on.
 **1. stdout carries the envelope and nothing else.** One stray `print()`, or
 one log line from a library, makes the response unparseable. Point
 `sys.stdout` at stderr before doing any work, and write the envelope to the
-real stdout you saved first. The template already does this — do not undo it.
+real stdout you saved first. The skeleton below does this — do not undo it.
 
 **2. Exit 0 whenever you produced an envelope**, including for failures. A
 business failure is a *successful call that returned a failure*. Exiting
@@ -204,8 +271,19 @@ agent that grades photos has no business being handed a database password.
 An empty list is a good answer if you need nothing.
 
 **6. `describe` must be cheap.** It has to answer on a machine that cannot
-run the rest of your agent, so keep heavy imports inside the capability that
-needs them, not at the top of the file.
+install your dependencies — that is how the whole repository is checked
+without building every agent. So a heavy import goes *inside the function for
+the capability that needs it*, never at the top of the file:
+
+```python
+def _score(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
+    import numpy            # imported only when this capability is called
+    ...
+```
+
+That is also why each capability gets its own small handler function rather
+than living inline in `dispatch` — `dispatch` stays a router, the handler
+does the translating, and your real logic stays in its own module.
 
 ### `agent.yaml`
 
@@ -213,8 +291,9 @@ needs them, not at the top of the file.
 protocol: agentcall/v1
 name: my-agent            # must equal the folder name
 description: >-
-  One line. This is what a human reads in `agents list`, and what another
-  agent would route on. Say what it does and for whom.
+  Two or three sentences — the paragraph you wrote in Part 2. This is what a
+  human reads in `agents list`, and what another agent would route on. Say
+  what it does, for whom, and what it will not do.
 
 runtime:
   type: subprocess
@@ -256,7 +335,143 @@ capabilities:
 ```
 
 Every capability in the code must be declared here, and vice versa. A
-mismatch fails `agents check`.
+mismatch fails `agents check`, which compares the **capability names** your
+`describe` reports against the names in `agent.yaml` — a set against a set.
+Descriptions and schemas are not compared, so they cannot drift you into a
+failure, but keeping them honest is what the review board reads.
+
+`describe` hardcodes its capability list in Python rather than parsing
+`agent.yaml`. That is two places holding the same list on purpose: parsing
+your own manifest would make `describe` agree with it by construction and
+prove nothing. `agents check` exists precisely to catch them disagreeing.
+
+### The skeleton
+
+This is `agent_main.py` as the template ships it. Start from this — it already
+satisfies rules 1, 2 and 3. Replace `greet` with your capability, and move
+anything that is real work into a separate module.
+
+```python
+#!/usr/bin/env python3
+"""One line about your agent."""
+
+from __future__ import annotations
+
+import json
+import sys
+import traceback
+from typing import Any
+
+PROTOCOL = "agentcall/v1"
+AGENT_NAME = "my-agent"          # must equal the folder name
+
+# Mirrors agent.yaml by hand. `agents check` fails if the two disagree.
+CAPABILITIES = (
+    ("describe", "Report this agent's name and capabilities. Costs nothing."),
+    ("greet", "Return a greeting. Replace this with something useful."),
+)
+
+
+def main() -> int:
+    # RULE 1. Do this before anything else can print.
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        envelope = dispatch(sys.stdin.read())
+    except Exception as exc:  # noqa: BLE001 — an envelope is mandatory
+        traceback.print_exc(file=sys.stderr)
+        envelope = fail("", "internal", f"{type(exc).__name__}: {exc}")
+    finally:
+        sys.stdout = real_stdout
+
+    json.dump(envelope, real_stdout)
+    real_stdout.write("\n")
+    real_stdout.flush()
+    return 0                      # RULE 2: an envelope was produced.
+
+
+def dispatch(raw: str) -> dict[str, Any]:
+    try:
+        request = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        return fail("", "invalid_request", f"stdin is not valid JSON: {exc}")
+    if not isinstance(request, dict):
+        return fail("", "invalid_request", "request must be a JSON object")
+    if request.get("protocol") != PROTOCOL:
+        return fail("", "invalid_request", f"unsupported protocol {request.get('protocol')!r}")
+
+    capability = request.get("capability")
+    if not isinstance(capability, str):
+        return fail("", "invalid_request", "missing 'capability'")
+
+    payload = request.get("input") or {}
+    if not isinstance(payload, dict):
+        return fail(capability, "invalid_request", "'input' must be an object")
+
+    if capability == "describe":
+        return ok(capability, {
+            "name": AGENT_NAME,
+            "protocol": PROTOCOL,
+            "capabilities": [{"name": n, "description": d} for n, d in CAPABILITIES],
+        })
+
+    if capability == "greet":
+        # RULE 4: validate your own input, and say what was wrong.
+        who = payload.get("name", "world")
+        if not isinstance(who, str) or not who.strip():
+            return fail(capability, "invalid_request", "'name' must be a non-empty string")
+        return ok(capability, {"greeting": f"Hello, {who.strip()}!"})
+
+    declared = ", ".join(n for n, _ in CAPABILITIES)
+    return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
+
+
+def ok(capability: str, output: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "protocol": PROTOCOL, "ok": True, "capability": capability,
+        "output": output, "usage": zero_usage(), "error": None,
+    }
+
+
+def fail(capability: str, etype: str, message: str, *, retryable: bool = False) -> dict[str, Any]:
+    return {
+        "protocol": PROTOCOL, "ok": False, "capability": capability,
+        "output": None, "usage": zero_usage(),
+        "error": {"type": etype, "message": message, "retryable": retryable},
+    }
+
+
+def zero_usage() -> dict[str, int]:
+    # Always report usage, zeroed when nothing was spent. Optional accounting
+    # is accounting that gets forgotten.
+    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+`python3 agent_main.py` puts the script's own folder on `sys.path`, so a
+sibling `units.py` is imported as `import units`.
+
+### Dependencies
+
+The template is standard-library only, which is why `command:` is a bare
+`["python3", "agent_main.py"]` and it runs anywhere with nothing installed.
+**Prefer that.** If you genuinely need a third-party package, add a
+`pyproject.toml` to your folder and point the manifest at your own
+environment:
+
+```yaml
+runtime:
+  command: ["uv", "run", "python", "agent_main.py"]
+  test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-q"]
+```
+
+Your dependencies stay inside your folder — they never touch the orchestrator
+or another agent. This is also what rule 6 is about: `describe` has to answer
+on a machine that cannot install your dependencies, so keep heavy imports
+inside the capability that needs them.
 
 ### Shape of the code
 
@@ -274,10 +489,41 @@ is one of the things the board checks.
 | | |
 |---|---|
 | `agent.yaml` | The manifest above |
-| `agent_main.py` | The adapter |
+| `agent_main.py` | The adapter — protocol in, protocol out, no business logic |
+| `<your-logic>.py` | The actual work. Imports nothing about the protocol. |
 | `README.md` | What it does, how to run it, what it will **not** do |
-| `LICENSE` | Pick one deliberately — nothing is inherited |
-| `tests/` | Tests that run the real entrypoint |
+| `LICENSE` | Pick one deliberately — nothing is inherited. MIT is fine; put your own name on it. |
+| `tests/` | Tests that run the real entrypoint. No `__init__.py` needed. |
+
+Plus two edits outside your folder, which `agents new` writes for you. If you
+built the folder by hand, make them yourself — without them your agent is
+never callable, because discovery is by declaration and never by globbing.
+
+`registry.yaml` at the repository root, in full — add the last line:
+
+```yaml
+version: 2
+
+agents:
+  - path: realty-lead-gen
+  - path: my-agent
+```
+
+Paths only. Everything else about your agent lives in your own `agent.yaml`.
+
+The agents table in the root `README.md` — add the last row:
+
+```markdown
+## Agents
+
+| Agent | Status | Capabilities |
+|---|---|---|
+| [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
+| [`my-agent`](./my-agent) | active | `your_capability` |
+```
+
+`active` is the status to use. List your real capabilities, not `describe` —
+every agent has that one.
 
 ### What good looks like
 
