@@ -8,8 +8,10 @@ board decides whether the agent is good enough, and the platform runs what is
 merged — with each tenant isolated from the others.
 
 **Today.** A monorepo with a deterministic contract, a local orchestrator, one
-production agent, and a review board that has never run. The distance between
-those two sentences is this document.
+production agent, and a review board that has now run twice — blocking a
+deliberately bad agent and passing a correct one, both locally. It is not yet
+a *gate*: that needs a token and branch protection, both of which need the
+owner. The distance between those two sentences is this document.
 
 Status: ✅ done · 🟡 partial · ⬜ not started · 🔒 blocked on a human
 
@@ -22,16 +24,16 @@ serve, and one stage of it is empty.
 
 | | Item | Status |
 |---|---|---|
-| 1.1 | Interview-driven scaffolding — *why does this agent exist, what is its distinct purpose, what capabilities* — writing the answers into `agent.yaml` | ⬜ |
+| 1.1 | Interview-driven scaffolding — *why does this agent exist, what is its distinct purpose, what capabilities* — writing the answers into `agent.yaml` | ✅ `/new-agent` interviews before it scaffolds, and refuses |
 | 1.2 | `_template` a copyable working agent with starter tests | ✅ |
 | 1.3 | Integration completeness — a renamed template is rejected | ✅ |
-| 1.4 | `/raise-pr` — gates, then board, then PR or denial | 🟡 written, never executed |
-| 1.5 | Review board — four reviewers, one lens each | 🟡 written, never executed |
+| 1.4 | `/raise-pr` — gates, then board, then PR or denial | ✅ now a skill under `.claude/skills/`, and executed |
+| 1.5 | Review board — four reviewers, one lens each | ✅ executed twice; blocked the bad agent, passed the good one |
 | 1.6 | CI review gate on the pull request | 🟡 needs secret + branch protection |
-| 1.7 | First end-to-end run against a deliberately bad agent | ⬜ |
+| 1.7 | First end-to-end run against a deliberately bad agent | ✅ 10 blocking findings across three reviewers |
 
-**1.1 is the only stage with nothing behind it.** Without it a contributor
-scaffolds by guesswork, meets four reviewers, and iterates blind.
+**Every stage now has something behind it.** What remains is 1.6: the board
+advises, and only branch protection plus a token make it decide.
 
 ## W2 — Guidance while they build
 
@@ -40,11 +42,11 @@ nobody reopens. Three mechanisms, each doing what only it can.
 
 | | Item | Mechanism | Status |
 |---|---|---|---|
-| 2.1 | `/new-agent` — the interview | skill | ⬜ |
-| 2.2 | Contract rules that load when editing a manifest or entrypoint | `.claude/rules/` with `paths:` | ⬜ |
-| 2.3 | Manifest edited → integration check runs and reports | `PostToolUse` hook | ⬜ |
-| 2.4 | Committed team settings so guidance applies to every clone | `.claude/settings.json` | ⬜ |
-| 2.5 | The `agents` CLI as the contributor's tool — `list`, `describe`, `call`, `check` | tool | ✅ |
+| 2.1 | `/new-agent` — the interview | skill | ✅ |
+| 2.2 | Contract rules that load when editing a manifest or entrypoint | `.claude/rules/` with `paths:` | ✅ two rules, both path-scoped |
+| 2.3 | Manifest edited → integration check runs and reports | `PostToolUse` hook | ✅ exit 2 on a broken manifest, silent otherwise |
+| 2.4 | Committed team settings so guidance applies to every clone | `.claude/settings.json` | ✅ |
+| 2.5 | The `agents` CLI as the contributor's tool — `list`, `describe`, `call`, `check`, `test` | tool | ✅ |
 | 2.6 | Reference material loaded on demand rather than always | skill supporting files | ⬜ |
 
 **Rules guide, hooks enforce.** A rule is context; a hook exits non-zero. Use
@@ -112,19 +114,19 @@ Detail in [`CERTIFICATION_ROADMAP.md`](./CERTIFICATION_ROADMAP.md). Summary:
 | | Item | Status |
 |---|---|---|
 | 7.1 | Deterministic CI, scoped to what changed | ✅ |
-| 7.2 | `ANTHROPIC_API_KEY` repository secret | 🔒 |
+| 7.2 | `CLAUDE_CODE_OAUTH_TOKEN` repository secret (no API key needed — `claude setup-token`) | 🔒 |
 | 7.3 | **review board** required in branch protection | 🔒 |
 | 7.4 | Repository visibility decided — it is Public and `realty-lead-gen/LICENSE` says proprietary | 🔒 |
 | 7.5 | Secret scanning at root | ✅ |
-| 7.6 | Repository off iCloud-synced storage | 🔒 |
+| 7.6 | Repository off iCloud-synced storage | 🟡 both `.venv`s relocated out via symlink; the working copy itself is still on Desktop |
 
 ---
 
 ## Order of work
 
-**Now — W1.1 and W2.** The funnel has a strict back gate and no front. Every
-hour spent here is repaid by every contribution afterwards, and it closes most
-of the 20% certification domain as a side effect.
+**Now — W1.6.** W1.1 and W2 are done. The board runs and its findings are
+specific enough to act on, but nothing forces anyone to listen: that is a
+token and a required status check, and both need the owner.
 
 **Next — W3.** Ownership, version, and trust tier are small manifest and
 `CODEOWNERS` changes that become expensive to retrofit once agents exist.
