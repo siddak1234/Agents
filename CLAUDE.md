@@ -8,6 +8,23 @@ The contract is [`AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md). The procedure for
 adding an agent is [`CONTRIBUTING.md`](./CONTRIBUTING.md). Do not restate
 either here; a third copy is a third thing to forget to update.
 
+## "Agent" means one thing here
+
+Two different populations live in this repo. Keep them apart in your head and
+in your writing, or every instruction becomes ambiguous.
+
+| | **Agents** | **Reviewers** |
+|---|---|---|
+| Are | `realty-lead-gen` and its peers | `agent-architect`, `engineer-reviewer`, … |
+| Live in | a folder at the repo root | `.claude/agents/` |
+| Declared by | `agent.yaml` | Markdown + frontmatter |
+| Invoked by | the orchestrator, subprocess + JSON | Claude Code, during review |
+| Work on | the user's problem | this repository |
+| Deterministic | yes | no |
+
+They share no format, runtime, or contract. **"Agent" always means the first
+kind.** The second are *reviewers* — never call them agents.
+
 ## The two structural rules
 
 **1. Every agent lives in its own top-level folder. The root is the
@@ -33,7 +50,7 @@ Consequences that are load-bearing:
 
 ### Reserved root names
 
-`.git`, `.github`, `.gitignore`, `.gitattributes`, `_template`,
+`.git`, `.github`, `.claude`, `.gitignore`, `.gitattributes`, `_template`,
 `orchestrator`, `tests`, `docs`, `AGENT_PROTOCOL.md`, `CLAUDE.md`,
 `CONTRIBUTING.md`, `README.md`, `pyproject.toml`, `registry.yaml`,
 `uv.lock`, `.pre-commit-config.yaml`. Avoid generic names likely to be

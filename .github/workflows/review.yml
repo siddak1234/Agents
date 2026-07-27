@@ -1,0 +1,119 @@
+# The review board, running on the pull request.
+#
+# `/raise-pr` runs the same four reviewers on the contributor's machine, which
+# is faster and cheaper — but a slash command cannot gate anything, because
+# nothing stops someone running `gh pr create` instead. This job is the gate.
+# Require it in branch protection and the board becomes enforcement rather
+# than etiquette.
+#
+# Two deliberate choices:
+#
+#   * The deterministic gates run first and the board only runs if they pass.
+#     They are free and catch most of what a reviewer would otherwise spend
+#     tokens restating.
+#   * `pull_request`, never `pull_request_target`. The latter would let the
+#     board run on forks by exposing secrets to unreviewed code, which is a
+#     bad trade. Fork pull requests therefore get the deterministic gates
+#     only, and a human reads them.
+
+name: review board
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  board:
+    name: review board
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # reviewers diff against origin/main
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+      - run: uv sync --frozen
+
+      # Free, fast, and the same commands `/raise-pr` runs locally. A branch
+      # that fails here is not worth reviewing yet.
+      - name: Deterministic gates
+        run: |
+          uv run agents list --strict
+          uv run ruff format --check orchestrator tests _template
+          uv run ruff check orchestrator tests _template
+          uv run mypy orchestrator
+          uv run pytest -q
+
+      # A missing key must not turn every pull request red — including on
+      # forks, which never receive secrets. Warn and skip instead.
+      - name: Is the board configured?
+        id: cfg
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANTHROPIC_API_KEY is not set — the review board did not run. Deterministic gates passed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Review board
+        if: steps.cfg.outputs.ready == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 30"
+          prompt: |
+            Review this pull request's diff against origin/main using the
+            repository's review board. Invoke these four subagents in
+            parallel, and do not review the change yourself:
+
+              agent-architect, solution-architect, engineer-reviewer,
+              anthropic-practice
+
+            Each returns a JSON verdict. Collect every finding, then write
+            review-verdict.json in the repository root:
+
+              {"verdict": "pass" | "revise",
+               "blocking": [{"reviewer": "...", "where": "...", "problem": "...", "fix": "..."}],
+               "advisory": [ ... same shape ... ]}
+
+            verdict is "revise" if any reviewer returned a blocking finding.
+            Then post the findings as a pull request comment, grouped by
+            reviewer, blocking first. Be specific about files and fixes; a
+            review a contributor cannot act on is noise.
+
+      # The action reports; it does not fail the build. Parsing the verdict
+      # ourselves is what makes this a gate, and reading a file we asked for
+      # by name beats scraping the model's prose.
+      - name: Enforce the verdict
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          if [ ! -f review-verdict.json ]; then
+            echo "::error::The board produced no review-verdict.json. Treating that as a failure rather than a pass."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, sys
+          v = json.load(open("review-verdict.json"))
+          blocking = v.get("blocking") or []
+          for f in blocking:
+              print(f"::error file={f.get('where','')}::[{f.get('reviewer')}] {f.get('problem')} — {f.get('fix')}")
+          for f in v.get("advisory") or []:
+              print(f"::warning file={f.get('where','')}::[{f.get('reviewer')}] {f.get('problem')}")
+          if v.get("verdict") != "pass" or blocking:
+              print(f"\nReview board: revise. {len(blocking)} blocking finding(s).")
+              sys.exit(1)
+          print("Review board: pass.")
+          PY

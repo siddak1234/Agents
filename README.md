@@ -16,6 +16,7 @@ orchestrator knows about any agent.
 ├── _template/          a working agent to copy. Start here.
 ├── orchestrator/       discovery, manifests, transport, CLI
 ├── tests/              contract and template tests
+├── .claude/            reviewers and the /raise-pr command
 ├── docs/               roadmap and deeper notes
 ├── registry.yaml       which agents exist (paths only)
 └── <agent-name>/       one folder per agent, each with its own agent.yaml
@@ -74,6 +75,7 @@ is scoped with a `paths:` filter.
 |---|---|---|
 | `orchestrator.yml` | every change | ruff, strict mypy, registry validation, contract and template tests, then `agents check` |
 | `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy, unit tests, integration against real Postgres and Redis, coverage gate |
+| `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Needs an `ANTHROPIC_API_KEY` secret; warns and skips without one |
 
 `agents check` is the integration gate worth understanding: it calls
 `describe` on an agent — no network, no credentials, no cost — and catches a

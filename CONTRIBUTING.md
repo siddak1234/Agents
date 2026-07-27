@@ -101,27 +101,55 @@ These are enforced by tests and reviewed on every PR.
 
 Small and complete beats large and staged. One agent per PR.
 
-CI builds and describes **your agent only** — not everyone else's — so the
-result is about your work and nothing else. Two checks are worth knowing
-before you push:
+```
+/raise-pr Add weather-agent
+```
 
-- `agents list --strict` fails if your folder has an `agent.yaml` but is
-  missing from `registry.yaml`. Forgetting step 4 is the most common way a
-  new agent lands and is never callable.
-- `agents check <your-agent>` runs your entrypoint and compares what it
-  reports against your manifest. A capability in one but not the other fails.
+That runs the deterministic gates, then puts your branch in front of the
+**review board** — four reviewers reading your diff in parallel. If none of
+them blocks, it opens the pull request and carries their advisory notes into
+the description. If any blocks, no pull request is opened and you get the
+findings with the file and the fix.
 
-If you touched anything under `orchestrator/`, CI sweeps every agent — shared
-code can break all of them — and your PR needs a test that fails without your
-change. Fill in the checklist in the PR template.
+The same four reviewers run again in CI on the pull request, and *that* run is
+what branch protection enforces. `/raise-pr` is the fast path — a minute
+instead of a push-and-wait — not the gate.
 
-## What reviewers push back on
+CI builds and describes **your agent only**, so a red build is about your work
+and nobody else's. The exception is a change under `orchestrator/`: shared
+code can break every agent, so CI sweeps them all and your PR needs a test
+that fails without your change.
+
+## The review board
+
+Reviewers are **not** agents. They live in `.claude/agents/`, run inside
+Claude Code, and review this repository rather than doing work for a user.
+
+| Reviewer | Asks |
+|---|---|
+| `agent-architect` | Is this a well-formed agent — clear purpose, description someone could choose by, coherent capabilities, contract honoured? |
+| `solution-architect` | Does it belong here, shaped this way? Should it be a capability of an existing agent instead? |
+| `engineer-reviewer` | Is the code correct, and would the tests catch a regression? |
+| `anthropic-practice` | Does it follow Anthropic's practice for agents built on Claude? |
+
+A finding is **blocking** only when it names a real defect — an input that
+breaks it, a leaked credential, a structural choice expensive to undo.
+Everything else is advisory and never fails a build. A board that blocks on
+taste gets ignored, and then it blocks on nothing.
+
+Two things reviewers will not do: fix your code, or debate their own findings.
+You revise and run `/raise-pr` again.
+
+## What the board pushes back on
 
 - An agent that needs a server started before it can be called.
-- Capabilities that exist in code but not in `agent.yaml`, or vice versa.
+- A description that restates the name, or survives from the template.
+- Capabilities in code but not in `agent.yaml`, or the reverse.
 - `runtime.env.inherit` broader than the capabilities justify.
-- Business logic in the agentcall adapter. It translates the wire protocol and
-  nothing else.
+- Business logic in the agentcall adapter — it translates the wire protocol
+  and nothing else.
+- A file without one reason to change. Judged by cohesion, not line count.
+- Tests that assert the implementation back at itself.
 - Anything added to `orchestrator/` for one agent's benefit. Cross-agent
   features need two agents to design against — say so instead of guessing.
 - Documentation that describes intent rather than what the code does.
