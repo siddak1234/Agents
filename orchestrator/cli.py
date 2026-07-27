@@ -71,11 +71,15 @@ def _cmd_new(registry: Registry, args: argparse.Namespace) -> int:
     print(
         f"\nNext, in {args.name}/:\n"
         f"  1. agent.yaml — write the description and your real capabilities,\n"
-        f"     with input and output schemas, then delete the TODO markers.\n"
+        f"     each with an input and an output schema. Point runtime.lint at\n"
+        f"     real linting once you have dependencies; nothing else checks\n"
+        f"     your code.\n"
         f"  2. agent_main.py — implement them. Keep `describe`.\n"
         f"  3. Add a LICENSE. It is deliberately not copied: licensing is per\n"
         f"     agent and choosing one should be a decision, not an inheritance.\n"
-        f"  4. Replace the README and the tests with your own.\n\n"
+        f"  4. Replace the README and the tests with your own.\n"
+        f"  5. Clear every `TODO(new agent)` marker. They are in all four\n"
+        f"     files, not just the manifest, and the whole folder is checked.\n\n"
         f"Then run `agents verify`. It will still fail, and what it reports is\n"
         f"the list of things that make this an agent rather than a copy."
     )
