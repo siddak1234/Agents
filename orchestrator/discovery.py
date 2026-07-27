@@ -89,6 +89,12 @@ def integration_problems(registry: Registry) -> list[str]:
                 f"nothing runs its tests — not CI, not a reviewer, not you."
             )
 
+        if not manifest.lint:
+            problems.append(
+                f"{where}: no runtime.lint. Root tooling checks root-owned code only, "
+                f"so without this nothing lints or type-checks your source."
+            )
+
         # The whole folder, not just the manifest. The template plants markers
         # in `agent_main.py`, `README.md` and its starter test as well, so a
         # manifest-only scan passed a copy with most of its TODOs untouched.

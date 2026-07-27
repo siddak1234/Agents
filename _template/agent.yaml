@@ -31,6 +31,16 @@ runtime:
   # assuming your language, and untestable-by-CI means untested.
   test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
 
+  # TODO(new agent): how your agent checks its own source, run from this
+  # folder. Root tooling covers root-owned code only — the moment you copy
+  # this folder it leaves that scope, so this is the only thing that lints or
+  # type-checks your code.
+  #
+  # `compileall` is the strongest check available with nothing installed: it
+  # catches a syntax error and exits non-zero. Replace it with real linting
+  # once you have dependencies — `["uv", "run", "ruff", "check", "."]`.
+  lint: ["python3", "-m", "compileall", "-q", "."]
+
   # TODO(new agent): name the environment variables your agent actually needs.
   #
   # Deny by default: an agent sees only what it lists here, plus the base

@@ -28,6 +28,11 @@ runtime:
   # a test failure that is really a missing interpreter dependency.
   test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-m", "unit", "-q"]
 
+  # The same checks `make lint` runs. Root tooling covers root-owned code
+  # only, so this is what actually gets this agent's source linted and
+  # type-checked by `agents lint` and by CI.
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "make", "lint"]
+
   # Least privilege: this agent sees only what is named here, plus the base
   # variables every process needs (PATH, HOME, ...). Everything else in the
   # orchestrator's environment is withheld.

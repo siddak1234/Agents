@@ -13,6 +13,7 @@ disk, a broken entrypoint, or a manifest that no longer matches its code.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import subprocess
 import sys
@@ -50,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         "call": _cmd_call,
         "check": _cmd_check,
         "test": _cmd_test,
+        "lint": _cmd_lint,
         "new": _cmd_new,
         "verify": _cmd_verify,
     }
@@ -251,19 +253,53 @@ def _cmd_test(registry: Registry, args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    return _run_declared(selected, "test")
+
+
+def _cmd_lint(registry: Registry, args: argparse.Namespace) -> int:
+    """Run each agent's own lint command, in its own folder.
+
+    Root tooling covers root-owned code only, by design — so until this
+    existed, a contributed agent's source was checked by nothing unless
+    someone hand-wrote a pipeline for it. Exactly one agent had.
+    """
+    try:
+        selected = [registry.get(n) for n in args.agents] if args.agents else list(registry)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    return _run_declared(selected, "lint")
+
+
+def _declared(manifest: AgentManifest, field: str) -> tuple[str, ...]:
+    value = getattr(manifest, field)
+    assert isinstance(value, tuple)  # noqa: S101 — narrowing a known field
+    return value
+
+
+def _run_declared(selected: list[AgentManifest], field: str) -> int:
+    """Run each agent's declared `runtime.<field>` command, from its folder.
+
+    One implementation for `test` and `lint`. They differ only in which field
+    they read: same working directory, same environment policy, same
+    reporting — and a second copy would be a second place for the environment
+    handling below to drift.
+    """
     failed = 0
     for manifest in selected:
-        if not manifest.test:
+        command = _declared(manifest, field)
+        if not command:
             failed += 1
-            print(f"FAIL  {manifest.name}: declares no runtime.test", file=sys.stderr)
+            print(f"FAIL  {manifest.name}: declares no runtime.{field}", file=sys.stderr)
             continue
-        print(f"---- {manifest.name}: {' '.join(manifest.test)}", flush=True)
+        print(f"---- {manifest.name}: {' '.join(command)}", flush=True)
         completed = subprocess.run(  # noqa: S603 — command comes from a repo-controlled manifest
-            list(manifest.test),
+            list(command),
             cwd=manifest.workdir,
-            # The same allow-list a call gets. A test command is arbitrary code
-            # from a contributor, run on a maintainer's machine and in CI where
-            # the real secrets live, so it is the last place to widen the
+            # The same allow-list a call gets. This is arbitrary code from a
+            # contributor, run on a maintainer's machine and in CI where the
+            # real secrets live, so it is the last place to widen the
             # environment. It also stops the orchestrator's own VIRTUAL_ENV
             # bleeding through and pointing the agent's tooling at the wrong
             # interpreter.
@@ -320,7 +356,8 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
     for label, handler in (
         ("agents list --strict", _verify_strict),
         ("agents check", _verify_check),
-        ("agents test", _verify_test),
+        ("agents lint", functools.partial(_verify_declared, field="lint")),
+        ("agents test", functools.partial(_verify_declared, field="test")),
     ):
         results.append((label, *handler(registry, args)))
 
@@ -357,14 +394,16 @@ def _verify_check(registry: Registry, args: argparse.Namespace) -> tuple[str, st
     return ("FAIL", "\n".join(failures)) if failures else ("ok", "")
 
 
-def _verify_test(registry: Registry, args: argparse.Namespace) -> tuple[str, str]:
+def _verify_declared(registry: Registry, args: argparse.Namespace, field: str) -> tuple[str, str]:
+    """`_run_declared`, quietly, keeping only the tail of a failure."""
     failures = []
     for manifest in _verify_scope(registry, args):
-        if not manifest.test:
-            failures.append(f"{manifest.name}: declares no runtime.test")
+        command = _declared(manifest, field)
+        if not command:
+            failures.append(f"{manifest.name}: declares no runtime.{field}")
             continue
         completed = subprocess.run(  # noqa: S603 — command comes from a repo-controlled manifest
-            list(manifest.test),
+            list(command),
             cwd=manifest.workdir,
             env=build_env(manifest),
             capture_output=True,
@@ -483,6 +522,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     p_test.add_argument(
         "agents", nargs="*", help="agent names to test. Omit to test every registered agent."
+    )
+
+    p_lint = sub.add_parser(
+        "lint", help="run each agent's own declared lint command, in its own folder"
+    )
+    p_lint.add_argument(
+        "agents", nargs="*", help="agent names to lint. Omit to lint every registered agent."
     )
 
     p_new = sub.add_parser("new", help="scaffold a new agent folder from the template")

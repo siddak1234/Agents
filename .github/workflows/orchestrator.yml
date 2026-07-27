@@ -175,6 +175,13 @@ jobs:
       # The command must install whatever it needs — the step above syncs an
       # agent's default dependencies only, so a test command that assumes a
       # dev extra was already installed fails here and nowhere else.
+      # Root tooling lints root-owned code only, by design. Without this an
+      # agent's own source is checked by nothing unless someone hand-wrote a
+      # pipeline for it — which exactly one agent had.
+      - name: Lint their own code
+        if: steps.scope.outputs.mode != 'none'
+        run: uv run agents lint ${{ steps.scope.outputs.agents }}
+
       - name: Run their own tests
         if: steps.scope.outputs.mode != 'none'
         run: uv run agents test ${{ steps.scope.outputs.agents }}
