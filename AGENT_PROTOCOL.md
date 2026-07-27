@@ -109,7 +109,7 @@ runtime:
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
   test: ["uv", "run", "--frozen", "pytest", "-m", "unit", "-q"]   # CI runs this
   env:
-    inherit: [ANTHROPIC_API_KEY, ANTHROPIC_MODEL_*]   # names or fnmatch patterns
+    inherit: [ANTHROPIC_API_KEY, ANTHROPIC_MODEL_*]   # exact names, or prefix + `*`
     set: { LOG_FORMAT: json }                         # literals, never secrets
 
 capabilities:
@@ -131,7 +131,22 @@ localhost database.
 `LC_ALL`, `TMPDIR`, `TZ` — without which nothing executes, none carrying
 credentials — plus exactly what `runtime.env` names. An agent that grades
 photos has no business reading a database password because the process that
-launched it could. `inherit: ["*"]` is rejected by the loader.
+launched it could.
+
+An `inherit` entry is either an **exact variable name** or a **literal prefix
+of at least three characters followed by one trailing `*`**. Anything else is
+rejected by the loader. The rule is a shape rule rather than a ban on `"*"`
+because matching is done with `fnmatch`, which also reads `?` and `[…]`:
+`"*"`, `?*`, `**`, `*_*` and `[A-Z]*` all mean "the whole environment", and a
+one- or two-character prefix is the same thing written quietly.
+
+**That rule is not a safety guarantee.** It rejects entries that match
+approximately everything; it cannot tell whether a well-formed prefix is too
+broad for *this* agent. `AWS*` is legal here and reaches
+`AWS_SECRET_ACCESS_KEY`; so do `DB_*`, `API*` and `JWT*`. Whether a capability
+needs the family it names is a review question, and no character count settles
+it — see CONTRIBUTING.md, where `runtime.env.inherit` broader than the
+capabilities justify is a blocking finding.
 
 **Output is bounded.** stdout goes to a temporary file, not a pipe, and is
 refused unread past 8 MiB. An envelope is kilobytes; anything near the limit

@@ -40,13 +40,24 @@ desktop.ini
 # two runs shared a concurrency group and cancelled each other. The failure
 # looked like a flaky pipeline, not a stray file.
 #
-# Narrow on purpose — a single space, digits, then an extension. A file you
-# genuinely meant to commit will not match unless it is named like a
-# conflict copy, and `git add -f` still works if one somehow is.
+# Narrow on purpose — a single space, then digits. A file you genuinely meant
+# to commit will not match unless it is named like a conflict copy, and
+# `git add -f` still works if one somehow is.
+#
+# The extensionless forms are not decoration. iCloud raced the `.venv` symlink
+# and left a `.venv 2/` directory beside it, twice. An earlier version of these
+# patterns required a `.` after the digit, so it matched neither — and both sat
+# unignored in the working tree. They escaped `git status` only because git
+# cannot track an empty directory; the first file to land inside one would have
+# shown up as untracked.
 * [0-9].*
 * [0-9][0-9].*
+* [0-9]
+* [0-9][0-9]
 * copy.*
 * copy [0-9].*
+* copy
+* copy [0-9]
 
 # --- Editors / IDEs ----------------------------------------------------
 .vscode/

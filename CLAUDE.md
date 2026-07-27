@@ -53,8 +53,8 @@ Consequences that are load-bearing:
 `.git`, `.github`, `.claude`, `.gitignore`, `.gitattributes`, `_template`,
 `orchestrator`, `tests`, `docs`, `AGENT_PROTOCOL.md`, `CLAUDE.md`,
 `CONTRIBUTING.md`, `README.md`, `pyproject.toml`, `registry.yaml`,
-`uv.lock`, `.pre-commit-config.yaml`. Avoid generic names likely to be
-claimed later — `scripts`, `tools`, `shared`.
+`uv.lock`, `.pre-commit-config.yaml`, `.venv`. Avoid generic names likely to
+be claimed later — `scripts`, `tools`, `shared`.
 
 **A leading underscore means "not an agent."** `agents list --strict` fails on
 any folder holding an `agent.yaml` that is not registered — that is almost

@@ -23,6 +23,7 @@ from orchestrator import runner as runner_mod
 from orchestrator.cli import main
 from orchestrator.contract import PROTOCOL, CallRequest, CallResult
 from orchestrator.discovery import DiscoveryError, load_registry, unregistered_agent_dirs
+from orchestrator.manifest import AgentEnv, ManifestError
 from orchestrator.runner import BASE_ENV, build_env, call, describe
 
 STUB = """
@@ -190,16 +191,93 @@ def test_agent_sees_only_the_environment_it_declared(stub, monkeypatch):
     assert "PATH" in keys, "base variables must still be present or nothing can run"
 
 
-def test_inherit_everything_is_rejected(stub):
+def _with_inherit(stub, entry: str):
+    """Rewrite the stub's inherit list to a single entry and reload."""
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
-            "inherit: [STUB_ALLOWED, STUB_PREFIXED_*]", 'inherit: ["*"]'
+            "inherit: [STUB_ALLOWED, STUB_PREFIXED_*]", f"inherit: [{entry}]"
         ),
         encoding="utf-8",
     )
-    with pytest.raises(DiscoveryError, match="may not be"):
-        load_registry(stub.workdir.parent)
+    return load_registry(stub.workdir.parent)
+
+
+#: Every one of these matched essentially the whole environment through
+#: `fnmatch` while passing an equality check against `"*"`. They are the
+#: reason the rule is a shape rule rather than a denylist. `"AB*"` is the
+#: boundary case: without it, lowering MIN_INHERIT_PREFIX to 2 breaks nothing
+#: in this file and the threshold stops being pinned by anything.
+WILDCARD_EVASIONS = [
+    '"*"',
+    '"?*"',
+    '"**"',
+    '"*_*"',
+    '"[A-Z]*"',
+    '"?"',
+    '"*KEY*"',
+    '"A*"',
+    '"AB*"',
+]
+
+
+@pytest.mark.parametrize("entry", WILDCARD_EVASIONS)
+def test_inherit_cannot_smuggle_in_the_whole_environment(stub, entry):
+    """Deny-by-default has to survive someone writing "everything" differently.
+
+    `build_env` matches with `fnmatch`, which reads `?` and `[…]` too — so
+    rejecting the literal `"*"` and nothing else left `?*`, `**`, `*_*` and
+    `[A-Z]*` each matching every variable the orchestrator holds. A short
+    prefix is the same problem more quietly: `A*` reaches
+    `AWS_SECRET_ACCESS_KEY`.
+    """
+    with pytest.raises(DiscoveryError):
+        _with_inherit(stub, entry)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "STUB_ALLOWED",
+        "STUB_PREFIXED_*",
+        "ANTHROPIC_MODEL_*",
+        # The other half of the boundary: exactly MIN_INHERIT_PREFIX characters
+        # must still be accepted, so raising the threshold also fails a test
+        # rather than silently narrowing what agents may declare.
+        "ABC*",
+    ],
+)
+def test_an_exact_name_or_a_real_prefix_is_still_allowed(stub, entry):
+    """The rule must not break the two shapes agents legitimately use."""
+    assert _with_inherit(stub, entry).get("stub-agent").env.inherit == (entry,)
+
+
+def test_the_inherit_rule_is_enforced_by_the_type_not_only_the_loader():
+    """A future construction path must not be able to skip the check.
+
+    `build_env` consumes `inherit` a long way from where the loader validated
+    it, and this invariant is what stops an agent reading a credential it never
+    declared — so it belongs on the type, not only in the one function that
+    happens to build it today.
+    """
+    with pytest.raises(ManifestError, match="at most one"):
+        AgentEnv(inherit=("*_*",))
+    assert AgentEnv(inherit=("STUB_PREFIXED_*", "EXACT_NAME")).inherit == (
+        "STUB_PREFIXED_*",
+        "EXACT_NAME",
+    )
+
+
+def test_a_wildcard_entry_does_not_reach_an_undeclared_secret(stub, monkeypatch):
+    """The property the shape rule exists to protect, asserted end to end."""
+    monkeypatch.setenv("SUPER_SECRET_DB_PASSWORD", "hunter2")
+    monkeypatch.setenv("STUB_PREFIXED_ONE", "declared by pattern")
+
+    reloaded = _with_inherit(stub, "STUB_PREFIXED_*")
+    keys = set(build_env(reloaded.get("stub-agent")))
+
+    assert "STUB_PREFIXED_ONE" in keys
+    assert "SUPER_SECRET_DB_PASSWORD" not in keys
 
 
 def test_env_defaults_to_nothing(tmp_path, stub):

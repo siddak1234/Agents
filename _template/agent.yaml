@@ -39,8 +39,13 @@ runtime:
   # no business being able to read a database password just because the
   # process that started it could.
   #
-  # Exact names or fnmatch patterns. `"*"` is rejected outright: inheriting
-  # everything is precisely what this setting exists to prevent.
+  # Each entry is either an exact variable name, or a literal prefix of at
+  # least three characters plus one trailing `*`. Anything else is rejected:
+  # `"*"`, `?*`, `**` and `[A-Z]*` all mean "the whole environment".
+  #
+  # Passing that check does not make an entry appropriate. `AWS*` is legal and
+  # reaches AWS_SECRET_ACCESS_KEY. Name what your capabilities read; a prefix
+  # that is broader than they justify is a blocking review finding.
   #
   #   env:
   #     inherit: [MY_API_KEY, MY_SERVICE_*]
