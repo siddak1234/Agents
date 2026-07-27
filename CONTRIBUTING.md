@@ -26,6 +26,13 @@ done at scale.
 
 ## Adding your agent
 
+**Not using Claude Code?** Read [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md)
+instead of this section. It is self-contained and written to be pasted into a
+Claude conversation, which is what gives a chat assistant any idea what
+`agentcall/v1` is — without it, it will invent something plausible and wrong.
+
+In Claude Code:
+
 ```
 /new-agent a weather forecast agent for field crews
 ```
@@ -36,13 +43,17 @@ credentials it needs — and only then scaffolds, writing your answers into
 `agent.yaml`. Most of what the review board later blocks on is decided in that
 conversation rather than in code.
 
-By hand instead:
+Anywhere else:
 
 ```bash
-cp -r _template my-agent && cd my-agent
+uv run agents new my-agent
 ```
 
-Everything needing a change is marked `TODO(new agent)`.
+That does the mechanical half — copies the template, sets the name in the two
+files that must agree, registers it, adds the README row. It deliberately
+leaves the description, the capabilities, the `TODO(new agent)` markers and
+the missing `LICENSE` alone: those are the decisions that make it an agent
+rather than a copy, and `--strict` reporting them is the integration.
 
 1. **Rename.** `name:` in `agent.yaml` and `AGENT_NAME` in `agent_main.py`
    must both equal the folder name.
@@ -54,10 +65,16 @@ Everything needing a change is marked `TODO(new agent)`.
 5. **Verify.**
 
    ```bash
+   uv run agents verify           # every gate CI runs, all reported at once
+   ```
+
+   Or individually, when you want one answer rather than all of them:
+
+   ```bash
    uv run agents list --strict    # is it actually integrated?
    uv run agents check my-agent   # does it run and match its manifest?
+   uv run agents test my-agent    # does its own test command pass?
    uv run agents call my-agent <capability> --input '{...}'
-   uv run pytest
    ```
 
    `--strict` is the one to run first. A renamed copy of the template passes

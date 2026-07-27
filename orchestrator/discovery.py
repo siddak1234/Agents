@@ -171,7 +171,10 @@ def load_registry(root: Path | None = None) -> Registry:
             f"{path}: expected version {REGISTRY_VERSION}, got {raw.get('version')!r}"
         )
 
-    entries = raw.get("agents")
+    # `agents:` with nothing under it parses as None. A repository with no
+    # agents yet is a legitimate state — it is what a fresh clone of this
+    # scaffold looks like — so that reads as empty rather than malformed.
+    entries = raw.get("agents") or []
     if not isinstance(entries, list):
         raise DiscoveryError(f"{path}: 'agents' must be a list")
 
