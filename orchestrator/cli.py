@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.contract import DESCRIBE, CallRequest, CallResult
-from orchestrator.discovery import DiscoveryError, Registry, load_registry
+from orchestrator.discovery import (
+    DiscoveryError,
+    Registry,
+    load_registry,
+    unregistered_agent_dirs,
+)
 from orchestrator.runner import call, describe
 
 
@@ -46,6 +51,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
+    if args.strict:
+        orphans = unregistered_agent_dirs(registry)
+        if orphans:
+            for name in orphans:
+                print(
+                    f"error: {name}/ contains an agent.yaml but is not in registry.yaml.\n"
+                    f"       Add `- path: {name}` to registry.yaml, or the agent is "
+                    f"never callable.",
+                    file=sys.stderr,
+                )
+            return 1
+
     if args.json:
         print(
             json.dumps(
@@ -143,11 +160,30 @@ def _cmd_call(registry: Registry, args: argparse.Namespace) -> int:
 
 
 def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
+    """Describe the named agents, or all of them when none are named.
+
+    CI names the agents a change actually touched. Checking every agent on
+    every pull request would build every agent's environment — so adding one
+    agent would slow down and could fail a pull request that has nothing to do
+    with it, and the author would be looking at someone else's breakage.
+    The full sweep is still right when shared code changes; that is the
+    caller's judgement to make, not this command's.
+    """
     if not len(registry):
         print("no agents registered")
         return 0
+
+    if args.agents:
+        try:
+            selected = [registry.get(name) for name in args.agents]
+        except DiscoveryError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    else:
+        selected = list(registry)
+
     failed = 0
-    for manifest in registry:
+    for manifest in selected:
         result = describe(manifest)
         if result.ok:
             caps = ", ".join(manifest.capability_names)
@@ -189,6 +225,11 @@ def _parser() -> argparse.ArgumentParser:
 
     p_list = sub.add_parser("list", help="list registered agents")
     p_list.add_argument("--json", action="store_true")
+    p_list.add_argument(
+        "--strict",
+        action="store_true",
+        help="also fail if a folder holds an agent.yaml but is not registered",
+    )
 
     p_desc = sub.add_parser("describe", help="describe one agent")
     p_desc.add_argument("agent")
@@ -207,7 +248,14 @@ def _parser() -> argparse.ArgumentParser:
     p_call.add_argument("--deadline-ms", type=int, default=None)
     p_call.add_argument("--timeout", type=float, default=None, help="hard kill after N seconds")
 
-    sub.add_parser("check", help="describe every agent; non-zero if any fails")
+    p_check = sub.add_parser(
+        "check", help="describe the named agents (default: all); non-zero if any fails"
+    )
+    p_check.add_argument(
+        "agents",
+        nargs="*",
+        help="agent names to check. Omit to check every registered agent.",
+    )
     return parser
 
 

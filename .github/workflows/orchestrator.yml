@@ -5,14 +5,15 @@
 # is why every agent's pipeline lives here behind a `paths:` filter rather
 # than in the agent's own folder.
 #
-# Two jobs, split by what they cost:
+# Two jobs:
 #
-#   contract  — no agent dependencies. The template agent is standard library
-#               only, so this stays fast and runs on every change.
-#   handshake — syncs each real agent and calls `describe` on it. This is the
-#               integration gate: it catches a registry that has drifted from
-#               disk, a broken entrypoint, and a manifest that no longer
-#               matches its agent's code.
+#   contract  — no agent dependencies, so it is fast and runs on everything.
+#   handshake — builds and describes only the agents a change concerns.
+#
+# The scoping in `handshake` is the point. A pull request that adds one agent
+# must not build every other agent, and must not go red because someone
+# else's agent is broken. But a change to shared code can break every agent,
+# and there the full sweep is exactly right. Scope follows what changed.
 
 name: orchestrator
 
@@ -51,21 +52,29 @@ jobs:
       - name: Mypy (strict)
         run: uv run mypy orchestrator
 
-      # Loads every manifest and checks the registry against what is on disk,
-      # without running any agent. Fails on a registered path that does not
-      # exist, a malformed agent.yaml, a duplicate agent, or a manifest whose
-      # name disagrees with its folder.
+      # Reads every manifest and checks the registry against what is on disk,
+      # without building or running any agent. Catches a registered path that
+      # does not exist, a malformed agent.yaml, a duplicate agent, or a
+      # manifest whose name disagrees with its folder.
+      #
+      # `--strict` adds the one a new contributor actually trips: a folder
+      # holding an agent.yaml that nobody added to registry.yaml. Discovery
+      # ignores unregistered folders by design, so without this the agent
+      # merges green and is simply never callable.
       - name: Validate the registry
-        run: uv run agents list
+        run: uv run agents list --strict
 
       - name: Contract and template tests
         run: uv run pytest -q
 
   handshake:
-    name: agents check (live)
+    name: agents check
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed to diff against the base and work out what a change touches.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
@@ -73,14 +82,87 @@ jobs:
       - name: Sync the orchestrator
         run: uv sync --frozen
 
-      # Each agent is synced in its own folder, never resolved against the
-      # orchestrator's dependencies. Add a line here when you add an agent
-      # that needs an environment; a standard-library agent needs nothing.
-      - name: Sync realty-lead-gen
-        run: uv sync --frozen
-        working-directory: realty-lead-gen
+      - name: Determine scope
+        id: scope
+        run: |
+          set -euo pipefail
 
-      # Calls `describe` on every registered agent. Cheap by design — no
-      # network, no credentials, no cost — so it can gate every merge.
-      - name: Describe every agent
-        run: uv run agents check
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+
+          # A brand-new branch has no usable base. Sweep everything rather
+          # than silently check nothing.
+          if ! git rev-parse --verify --quiet "$base^{commit}" > /dev/null; then
+            echo "no usable base ref — checking every agent"
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base"...HEAD)
+          echo "changed files:"; echo "$changed" | sed 's/^/  /'
+
+          # Shared surface: code every agent is called through. A change here
+          # can break any of them, so all must answer.
+          #
+          # registry.yaml is deliberately NOT in this list. Adding an agent
+          # necessarily edits it, and treating that as a shared-surface change
+          # would make every new-agent pull request rebuild every existing
+          # agent — the exact cost this scoping exists to avoid. Its integrity
+          # is already checked statically by `agents list --strict`.
+          # Documentation is not here either; prose cannot break a build.
+          if echo "$changed" | grep -qE '^(orchestrator/|pyproject\.toml|uv\.lock)'; then
+            echo "shared surface changed — checking every agent"
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Otherwise: only agents whose own folder changed, and only those
+          # actually in the registry. An unregistered folder is not an agent,
+          # so `_template` never reaches this list.
+          registered=$(uv run agents list --json |
+            uv run python -c 'import json,sys; print(" ".join(a["name"] for a in json.load(sys.stdin)))')
+          scoped=""
+          for dir in $(echo "$changed" | cut -d/ -f1 | sort -u); do
+            case " $registered " in *" $dir "*) scoped="$scoped $dir" ;; esac
+          done
+          scoped=$(echo "$scoped" | xargs || true)
+
+          if [ -z "$scoped" ]; then
+            echo "no agent folders touched — nothing to describe"
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "scoped to: $scoped"
+            echo "mode=list" >> "$GITHUB_OUTPUT"
+            echo "agents=$scoped" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the agents in scope
+        if: steps.scope.outputs.mode != 'none'
+        run: |
+          set -euo pipefail
+          agents="${{ steps.scope.outputs.agents }}"
+          if [ "${{ steps.scope.outputs.mode }}" = "all" ]; then
+            agents=$(uv run agents list --json |
+              uv run python -c 'import json,sys; print(" ".join(a["name"] for a in json.load(sys.stdin)))')
+          fi
+          # Convention rather than configuration, so adding an agent never
+          # means editing this workflow: an agent carrying its own project is
+          # synced in its own folder, and one with no dependencies needs
+          # nothing done to it.
+          for a in $agents; do
+            if [ -f "$a/pyproject.toml" ]; then
+              echo "::group::uv sync $a"
+              (cd "$a" && uv sync --frozen)
+              echo "::endgroup::"
+            fi
+          done
+
+      # Calls `describe` on each agent in scope: no network, no credentials,
+      # no cost. Proves the entrypoint resolves and the manifest still matches
+      # the code.
+      - name: Describe them
+        if: steps.scope.outputs.mode != 'none'
+        run: uv run agents check ${{ steps.scope.outputs.agents }}

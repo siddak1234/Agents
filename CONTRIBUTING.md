@@ -85,8 +85,18 @@ These are enforced by tests and reviewed on every PR.
 
 Small and complete beats large and staged. One agent per PR.
 
-Your PR should show `agents check` passing, `pytest` passing, and — if you
-touched anything under `orchestrator/` — a test that fails without your
+CI builds and describes **your agent only** — not everyone else's — so the
+result is about your work and nothing else. Two checks are worth knowing
+before you push:
+
+- `agents list --strict` fails if your folder has an `agent.yaml` but is
+  missing from `registry.yaml`. Forgetting step 4 is the most common way a
+  new agent lands and is never callable.
+- `agents check <your-agent>` runs your entrypoint and compares what it
+  reports against your manifest. A capability in one but not the other fails.
+
+If you touched anything under `orchestrator/`, CI sweeps every agent — shared
+code can break all of them — and your PR needs a test that fails without your
 change. Fill in the checklist in the PR template.
 
 ## What reviewers push back on

@@ -76,9 +76,20 @@ is scoped with a `paths:` filter.
 | `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy, unit tests, integration against real Postgres and Redis, coverage gate |
 
 `agents check` is the integration gate worth understanding: it calls
-`describe` on every registered agent — no network, no credentials, no cost —
-and catches a registry that has drifted from disk, a broken entrypoint, or a
-manifest that no longer matches its code.
+`describe` on an agent — no network, no credentials, no cost — and catches a
+broken entrypoint or a manifest that no longer matches its code.
+
+**It is scoped to what changed.** A pull request adding one agent builds and
+describes that agent only; it does not build every other agent, and it cannot
+go red because someone else's agent is broken. Changing `orchestrator/` or
+the root project does sweep every agent, because shared code can break any of
+them. A documentation-only change skips the job entirely.
+
+Registry integrity is checked separately and statically by
+`agents list --strict`, which costs nothing and catches the mistake new
+contributors actually make: writing an agent and forgetting to register it.
+Discovery ignores unregistered folders by design, so without that check the
+agent would merge green and simply never be callable.
 
 ## Roadmap
 

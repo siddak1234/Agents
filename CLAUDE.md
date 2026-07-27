@@ -39,6 +39,11 @@ Consequences that are load-bearing:
 `uv.lock`, `.pre-commit-config.yaml`. Avoid generic names likely to be
 claimed later — `scripts`, `tools`, `shared`.
 
+**A leading underscore means "not an agent."** `agents list --strict` fails on
+any folder holding an `agent.yaml` that is not registered — that is almost
+always a half-finished integration — and skips `_`-prefixed folders, which is
+what lets `_template` carry a real manifest without ever being callable.
+
 `_template/` is a working agent, deliberately absent from `registry.yaml` so
 it never appears in `agents list` as though it were real. `tests/` runs it
 every build, including copying and renaming it the way `CONTRIBUTING.md`

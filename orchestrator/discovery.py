@@ -43,6 +43,27 @@ class Registry:
         return len(self.agents)
 
 
+def unregistered_agent_dirs(registry: Registry) -> list[str]:
+    """Folders that look like an agent but are not in the registry.
+
+    Almost always a half-finished integration: someone copied `_template`,
+    wrote their agent, and forgot step 4. Nothing else notices — discovery
+    ignores unregistered folders by design — so the agent would merge and
+    simply never be callable.
+
+    A leading underscore means "not an agent" (`_template` is the working
+    example nobody should be able to invoke), so those are skipped.
+    """
+    return sorted(
+        path.name
+        for path in registry.root.iterdir()
+        if path.is_dir()
+        and not path.name.startswith((".", "_"))
+        and (path / "agent.yaml").is_file()
+        and path.name not in registry.agents
+    )
+
+
 def repo_root(start: Path | None = None) -> Path:
     """Walk up from `start` to the directory holding registry.yaml."""
     here = (start or Path(__file__).resolve().parent).resolve()

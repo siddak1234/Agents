@@ -20,8 +20,9 @@ from pathlib import Path
 import pytest
 
 from orchestrator import runner as runner_mod
+from orchestrator.cli import main
 from orchestrator.contract import PROTOCOL, CallRequest, CallResult
-from orchestrator.discovery import DiscoveryError, load_registry
+from orchestrator.discovery import DiscoveryError, load_registry, unregistered_agent_dirs
 from orchestrator.runner import BASE_ENV, build_env, call, describe
 
 STUB = """
@@ -217,6 +218,50 @@ def test_runaway_stdout_is_capped(stub, monkeypatch):
     result = call(stub, CallRequest(capability="flood", input={"bytes": 50_000}))
     assert result.error.type == "transport"
     assert "over the" in result.error.message and "limit" in result.error.message
+
+
+def test_check_can_be_scoped_to_named_agents(stub, capsys):
+    """CI names the agents a change touched; unknown names must fail loudly.
+
+    Without this, a typo in a workflow silently checks nothing and the job
+    goes green having verified an agent that does not exist.
+    """
+    root = str(stub.workdir.parent)
+    assert main(["--root", root, "check", "stub-agent"]) == 0
+    assert "stub-agent" in capsys.readouterr().out
+
+    assert main(["--root", root, "check", "no-such-agent"]) == 2
+    assert "unknown agent" in capsys.readouterr().err
+
+
+def test_check_with_no_names_covers_every_agent(stub, capsys):
+    assert main(["--root", str(stub.workdir.parent), "check"]) == 0
+    assert "stub-agent" in capsys.readouterr().out
+
+
+def test_an_unregistered_agent_folder_is_caught(stub, capsys):
+    """The half-finished integration: agent written, registry step forgotten.
+
+    Nothing else notices — discovery ignores unregistered folders on purpose —
+    so without this the agent merges and is simply never callable.
+    """
+    root = stub.workdir.parent
+    orphan = root / "forgotten-agent"
+    orphan.mkdir()
+    (orphan / "agent.yaml").write_text("protocol: agentcall/v1\n", encoding="utf-8")
+
+    assert unregistered_agent_dirs(load_registry(root)) == ["forgotten-agent"]
+
+    assert main(["--root", str(root), "list"]) == 0  # tolerated by default
+    assert main(["--root", str(root), "list", "--strict"]) == 1  # rejected in CI
+    assert "forgotten-agent" in capsys.readouterr().err
+
+
+def test_underscore_folders_are_not_agents(stub):
+    """`_template` carries an agent.yaml and must never count as an agent."""
+    (stub.workdir.parent / "_scratch").mkdir()
+    (stub.workdir.parent / "_scratch" / "agent.yaml").write_text("x: 1\n", encoding="utf-8")
+    assert unregistered_agent_dirs(load_registry(stub.workdir.parent)) == []
 
 
 def test_envelope_survives_a_round_trip():
