@@ -551,7 +551,7 @@ ones something executes.
 | Wholesaler scorer | Live | — | Deterministic |
 | Buyer's agent scorer | Live | — | Deterministic; hypothesis-tested |
 | Buyer intent matching | Live | — | Backs `GET /matches/property/{id}`; user-declared criteria only |
-| Explanation narratives | Live | optional `ANTHROPIC_API_KEY` | Genuinely optional: returns the deterministic component rationale when Claude is unavailable |
+| Explanation narratives | **Stub** | optional `ANTHROPIC_API_KEY` | `NarrativeGenerator` is written and typed but has zero callers: the scoring job never invokes it, `DealAnalysis.narrative` is never written, and the API returns `narrative: null` unconditionally. Calling this row Live was exactly the status-column lie this table warns about above |
 | Outbox relay | Live | optional `OUTBOX_WEBHOOK_URL` | `SELECT … FOR UPDATE SKIP LOCKED` claim, HMAC-signed POST; drains to the log when no URL is set |
 | Rate limiting | Live | optional `REDIS_URL` | `limits.aio` moving window keyed on the JWT `sub`, Redis-shared, fails open |
 

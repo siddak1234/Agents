@@ -26,22 +26,22 @@ if the working tree is dirty. Say which, and stop.
 ### 2. Deterministic gates — these are free, so they run first
 
 ```
-uv run agents list --strict
-uv run ruff format --check orchestrator tests _template
-uv run ruff check orchestrator tests _template
-uv run mypy orchestrator
-uv run pytest -q
-uv run agents check
-uv run agents test
+uv run agents verify
 ```
 
-If any fail: print the output, say what to fix, and **stop without calling the
+One command, every deterministic gate. This file used to enumerate the
+commands itself and the list drifted — it was missing `agents lint` entirely
+— which is why the contributor-facing definition of the gates lives in
+`agents verify`. (The CI workflows necessarily spell out their own steps;
+they run the same set, and a gate added to one belongs in both.)
+
+If it fails: print the output, say what to fix, and **stop without calling the
 board.** There is no sense paying an architect to review a branch that does
 not lint, and the failures are usually the same ones the board would restate.
 
-`agents test` runs each agent's own declared `runtime.test` command from its
-own folder, so a contributed agent's tests run here too — there is nothing
-extra to remember for the agent you just built.
+Among those gates, `agents lint` and `agents test` run each agent's own
+declared commands from its own folder, so the agent you just built is checked
+too — there is nothing extra to remember.
 
 ### 3. The review board
 
@@ -81,9 +81,12 @@ Finish by printing the pull request URL.
 ## Note
 
 This skill is the fast path, not the gate. The same four reviewers run again
-in CI on the pull request, and that run is what branch protection enforces.
-Running them here means finding out in a minute rather than after a push — it
-does not mean CI will agree if the branch changes afterwards.
+in CI on the pull request; that run becomes the gate once the owner adds a
+`CLAUDE_CODE_OAUTH_TOKEN` secret and requires the **review board** check in
+branch protection — until then it is advisory, and on fork pull requests it
+cannot run at all (GitHub withholds secrets from forks). Running the board
+here means finding out in a minute rather than after a push — it does not
+mean CI will agree if the branch changes afterwards.
 
 It runs in your own Claude Code session on your own subscription: no API key,
 nothing to configure.

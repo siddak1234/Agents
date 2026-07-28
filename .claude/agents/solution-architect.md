@@ -21,6 +21,16 @@ Two agents that would always be called together are usually one agent.
 **Boundaries.** Does the agent own a coherent slice of the problem, or is it
 a thin wrapper around one API call, or a grab-bag of unrelated capabilities?
 
+**Shape — an agent is not a service.** CONTRIBUTING.md "How big is an agent?"
+is your rule here, and a violation is **blocking**: a web server or port, an
+owned database with migrations, Docker or docker-compose, a worker queue —
+any "start this first" step. Look for the files, not the prose: a
+`docker-compose.yml`, an `alembic/` folder, a `main:app`, a worker module.
+If a capability genuinely requires one of these, the agent's README must
+justify it per capability; absent that justification, block with "this is a
+service — build it in its own repository and expose an agentcall adapter".
+Judge shape, never line count.
+
 **Isolation — the rule the whole design rests on:**
 - the agent imports nothing from `orchestrator/`
 - the agent imports nothing from another agent

@@ -192,6 +192,28 @@ def test_agent_sees_only_the_environment_it_declared(stub, monkeypatch):
     assert "PATH" in keys, "base variables must still be present or nothing can run"
 
 
+def test_the_handshake_receives_no_inherited_environment(stub, monkeypatch):
+    """`agents check` is documented "no credentials" — this makes it true.
+
+    `describe` used to run through the same environment as any capability
+    call, so the handshake received every variable the manifest inherits —
+    keys included, on every `agents check`, in every CI run. The handshake
+    proves the entrypoint resolves and the manifest matches the code; none of
+    that may depend on a credential.
+    """
+    monkeypatch.setenv("STUB_ALLOWED", "a-credential")
+
+    assert "STUB_ALLOWED" in build_env(stub)
+    assert "STUB_ALLOWED" not in build_env(stub, inherit=False)
+
+    # End to end: the subprocess itself must not see it either.
+    keys = set(call(stub, CallRequest(capability="environment"), inherit_env=False).output["keys"])
+    assert "STUB_ALLOWED" not in keys
+    assert "PATH" in keys
+
+    assert describe(stub).ok, "describe must still answer with the inherited env withheld"
+
+
 def _with_inherit(stub, entry: str):
     """Rewrite the stub's inherit list to a single entry and reload."""
     manifest = stub.workdir / "agent.yaml"
@@ -474,3 +496,20 @@ def test_usage_may_report_zeros_when_nothing_was_spent():
     """The whole point of mandatory accounting is that zero is a real answer."""
     result = CallResult.decode(_envelope(usage={}), capability="x")
     assert (result.usage.input_tokens, result.usage.cost_micros) == (0, 0)
+
+
+def test_an_agent_cannot_emit_a_transport_error():
+    """`transport` is the orchestrator's word, and only the orchestrator's.
+
+    AGENT_PROTOCOL.md says agents never emit it, but because it sat in
+    ERROR_TYPES an agent could — and its envelope was indistinguishable from
+    an orchestrator-side failure, which is the one distinction the taxonomy
+    exists to hold. An agent-emitted `transport` now demotes to `internal`
+    with the original text preserved.
+    """
+    raw = _envelope(ok=False, output=None, error={"type": "transport", "message": "spoofed"})
+    result = CallResult.decode(raw, capability="x")
+    assert result.error is not None
+    assert result.error.type == "internal"
+    assert "transport" in result.error.message
+    assert "spoofed" in result.error.message, "the agent's own text must survive"

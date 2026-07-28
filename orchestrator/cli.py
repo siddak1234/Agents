@@ -1,11 +1,17 @@
 """`agents` — the command-line face of the orchestrator.
 
-    agents list
-    agents describe <agent>
+    agents list [--strict] [--json]
+    agents describe <agent> [--static]
     agents call <agent> <capability> [--input JSON | --input-file PATH]
-    agents check
+    agents check [agents…]
+    agents test [agents…]
+    agents lint [agents…]
+    agents new <name>
+    agents verify [agents…]
 
-`check` is the one to run in CI: it loads every manifest and calls
+`verify` is the contributor's command: every deterministic gate CI runs,
+reported at once. (The review board in CI is model-driven and not here.)
+`check` is the cheap heart of it — it loads every manifest and calls
 `describe` on every agent, which catches a registry that has drifted from
 disk, a broken entrypoint, or a manifest that no longer matches its code.
 """
@@ -322,7 +328,13 @@ def _run_declared(selected: list[AgentManifest], field: str) -> int:
 #: arguments after `python -m`. Invoked through `sys.executable` rather than a
 #: bare command name so it works without `uv` on PATH and cannot pick up a
 #: different interpreter's tools by accident.
+#:
+#: The secret scan is here because "verify runs every deterministic gate CI
+#: runs" is a promise this list has already broken once: gitleaks was added
+#: to CI and not here, and for that window a branch could print "all gates
+#: pass" while carrying a committed credential that CI would reject.
 _TOOL_STEPS = (
+    ("secret scan", ("pre_commit", "run", "gitleaks", "--all-files")),
     ("ruff format", ("ruff", "format", "--check", "orchestrator", "tests", "_template")),
     ("ruff check", ("ruff", "check", "orchestrator", "tests", "_template")),
     ("mypy", ("mypy", "orchestrator")),
@@ -331,16 +343,31 @@ _TOOL_STEPS = (
 
 
 def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
-    """Run every gate CI runs, report all of them, exit non-zero if any failed.
+    """Run every deterministic gate CI runs; exit non-zero if any failed.
 
     Deliberately does not stop at the first failure. A contributor working
     through their first agent wants the whole list — often one root cause
     shows up as three of these — and a single block of output is something
     they can paste somewhere and ask about.
+
+    The one thing checked *before* any gate runs is the scope itself: a
+    misspelled agent name must be an error up front, not eight vacuous passes.
     """
+    try:
+        _verify_scope(registry, args)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     results: list[tuple[str, str, str]] = []
 
     for label, argv in _TOOL_STEPS:
+        # pre-commit is configuration-driven: with no config at this root
+        # there is nothing to run, which is a SKIP, not a FAIL — a scaffolded
+        # repository without hooks should not be told its secrets leaked.
+        if argv[0] == "pre_commit" and not (registry.root / ".pre-commit-config.yaml").is_file():
+            results.append((label, "SKIP", "no .pre-commit-config.yaml at this root"))
+            continue
         completed = subprocess.run(  # noqa: S603 — fixed argv, no user input
             [sys.executable, "-m", *argv],
             cwd=registry.root,
@@ -421,10 +448,16 @@ def _verify_declared(registry: Registry, args: argparse.Namespace, field: str) -
 
 
 def _verify_scope(registry: Registry, args: argparse.Namespace) -> list[AgentManifest]:
-    """Named agents, or all of them. An unknown name is caught by `check`."""
+    """Named agents, or all of them. Raises `DiscoveryError` on an unknown name.
+
+    This used to drop unknown names silently, which made every agent-scoped
+    gate pass vacuously: `agents verify tpyo` printed "All 8 gates pass" and
+    exited 0 while verifying nothing. A scope that cannot be resolved is an
+    error, not an empty scope.
+    """
     if not args.agents:
         return list(registry)
-    return [registry.get(n) for n in args.agents if n in registry.agents]
+    return [registry.get(n) for n in args.agents]
 
 
 def _describe_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:
@@ -539,7 +572,7 @@ def _parser() -> argparse.ArgumentParser:
     p_new.add_argument("name", help="folder and agent name, e.g. parcel-geo")
 
     p_verify = sub.add_parser(
-        "verify", help="run every gate CI runs and report all of them at once"
+        "verify", help="run every deterministic gate CI runs and report all at once"
     )
     p_verify.add_argument(
         "agents",

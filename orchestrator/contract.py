@@ -102,9 +102,15 @@ class CallError:
         if not isinstance(raw, dict):
             raise ProtocolError("error must be an object")
         etype = raw.get("type")
-        if etype not in ERROR_TYPES:
+        if etype not in ERROR_TYPES or etype == "transport":
             # An agent inventing its own taxonomy is a bug in the agent, but
             # losing the message would make it unfixable. Keep the text.
+            #
+            # `transport` gets the same treatment: AGENT_PROTOCOL.md says
+            # agents never emit it, yet because it sat in ERROR_TYPES an agent
+            # could — and its envelope would be indistinguishable from an
+            # orchestrator-side failure, which is the one distinction the
+            # taxonomy exists to hold.
             return cls("internal", f"undeclared error type {etype!r}: {raw.get('message')}")
         return cls(str(etype), str(raw.get("message", "")), bool(raw.get("retryable", False)))
 

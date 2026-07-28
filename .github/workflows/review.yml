@@ -44,8 +44,13 @@ jobs:
           cache-dependency-glob: "**/uv.lock"
       - run: uv sync --frozen
 
-      # Free, fast, and the same commands `/raise-pr` runs locally. A branch
-      # that fails here is not worth reviewing yet.
+      # Free and fast: the cheap subset of `agents verify`, which is what
+      # `/raise-pr` runs locally. The agent-scoped gates (`agents check`,
+      # `agents lint`, `agents test`) are deliberately not repeated here —
+      # the orchestrator workflow runs them on the same pull request, scoped
+      # to the agents the change touches, and running them twice would double
+      # the slowest part of CI for no additional signal. A branch that fails
+      # here is not worth reviewing yet.
       - name: Deterministic gates
         run: |
           uv run agents list --strict

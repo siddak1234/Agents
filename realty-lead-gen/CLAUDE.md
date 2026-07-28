@@ -1,9 +1,12 @@
 # realty-lead-gen
 
-Real-estate lead-generation backend. Ingests listings from MLS, portals, and
-off-market sources; enriches each property with Claude-powered condition
-grading, valuation, and comps; scores per persona (flipper / wholesaler /
-buyer's agent); materializes ranked leads into Postgres.
+Real-estate lead-generation backend. Built to ingest listings from MLS,
+portals, and off-market sources; enrich each property with Claude-powered
+condition grading, valuation, and comps; score per persona (flipper /
+wholesaler / buyer's agent); and materialize ranked leads into Postgres.
+Which of those paths are live versus stubbed is exactly what
+`ARCHITECTURE.md`'s status table records — several source adapters are
+stubs, and that table, not this paragraph, is the claim to trust.
 
 Stack: Python 3.13, FastAPI + async SQLAlchemy, Postgres 17 with PostGIS,
 Redis with arq for background jobs, Anthropic SDK for vision and reasoning.
@@ -19,7 +22,8 @@ was chosen.
 Run these from this folder, not the repository root.
 
 ```bash
-make setup            # uv sync + pre-commit hooks
+make setup            # uv sync (never `pre-commit install` — see the Makefile)
+make hooks            # this folder's pre-commit hooks, run on demand
 make test             # unit tests — fast, no docker
 make test-integration # needs docker (spins up postgres + redis)
 make test-cov         # full suite with coverage
@@ -44,8 +48,9 @@ These are easy to violate by accident and expensive to unwind:
   deal analyses, and scores are snapshot tables, not in-place updates. The
   audit trail is a design goal — "why did we see it this way at time T?"
   must stay answerable.
-- **`mypy` runs strict and Ruff has the bandit (`S`) rules on.** Both are
-  enforced by pre-commit; do not weaken a rule to make a commit pass.
+- **`mypy` runs strict and Ruff has the bandit (`S`) rules on.** Ruff runs
+  in this folder's hooks (`make hooks`) and both run in CI; do not weaken a
+  rule to make a commit pass.
 
 ## Adapters degrade, they do not fail
 

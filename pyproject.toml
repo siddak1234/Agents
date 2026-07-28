@@ -31,7 +31,11 @@ packages = ["orchestrator"]
 dev = ["pytest>=8.0", "ruff>=0.14", "mypy>=1.14", "types-PyYAML>=6.0", "pre-commit>=4.0"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# `_template/tests` is the starter suite every contributor copies. It was run
+# by no gate at all — root pytest did not collect it, and `agents test` skips
+# unregistered folders — so it could break and the first person to find out
+# would be an intern debugging their own copy of it.
+testpaths = ["tests", "_template/tests"]
 
 # The orchestrator is held to the same bar it asks of agents. realty-lead-gen
 # runs ruff and strict mypy on itself; shared code that everything else

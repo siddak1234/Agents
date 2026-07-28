@@ -107,8 +107,11 @@ description: One line, for humans and for routing.
 runtime:
   type: subprocess
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
-  test: ["uv", "run", "--frozen", "pytest", "-m", "unit", "-q"]   # CI runs this
-  lint: ["uv", "run", "--frozen", "make", "lint"]                 # and this
+  # `--extra dev` matters: CI syncs an agent's default dependencies only, so
+  # a test or lint command must install its own dev tools or it fails in CI
+  # and nowhere else. These two lines mirror the real manifest exactly.
+  test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-m", "unit", "-q"]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "make", "lint"]
   env:
     inherit: [ANTHROPIC_API_KEY, ANTHROPIC_MODEL_*]   # exact names, or prefix + `*`
     set: { LOG_FORMAT: json }                         # literals, never secrets

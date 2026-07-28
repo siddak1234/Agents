@@ -47,20 +47,33 @@ STDERR_TAIL_LINES = 40
 DEFAULT_TIMEOUT_S = 120.0
 
 
-def build_env(manifest: AgentManifest, extra: dict[str, str] | None = None) -> dict[str, str]:
+def build_env(
+    manifest: AgentManifest,
+    extra: dict[str, str] | None = None,
+    *,
+    inherit: bool = True,
+) -> dict[str, str]:
     """The exact environment an agent will see.
 
     Separate from `call` so it can be tested and inspected directly — "what
     can this agent read?" should be answerable without running it.
+
+    `inherit=False` withholds everything the manifest inherits, leaving only
+    the base variables and the committed `env.set` literals. That is the
+    handshake's environment: `describe` is documented as costing nothing and
+    needing no credentials, and until this flag existed the code quietly
+    disagreed — the handshake received every variable the manifest named,
+    keys included, on every `agents check` in every CI run.
     """
     env = {key: os.environ[key] for key in BASE_ENV if key in os.environ}
-    env.update(
-        {
-            key: value
-            for key, value in os.environ.items()
-            if any(fnmatch.fnmatchcase(key, pattern) for pattern in manifest.env.inherit)
-        }
-    )
+    if inherit:
+        env.update(
+            {
+                key: value
+                for key, value in os.environ.items()
+                if any(fnmatch.fnmatchcase(key, pattern) for pattern in manifest.env.inherit)
+            }
+        )
     env.update(dict(manifest.env.set))
     if extra:
         env.update(extra)
@@ -73,6 +86,7 @@ def call(
     *,
     timeout_s: float | None = None,
     env: dict[str, str] | None = None,
+    inherit_env: bool = True,
 ) -> CallResult:
     """Invoke one capability. Never raises for agent-side failure.
 
@@ -91,7 +105,7 @@ def call(
                 stdout=out,
                 stderr=err,
                 timeout=budget,
-                env=build_env(manifest, env),
+                env=build_env(manifest, env, inherit=inherit_env),
                 check=False,
             )
         except FileNotFoundError:
@@ -130,8 +144,15 @@ def call(
 
 
 def describe(manifest: AgentManifest, *, timeout_s: float = 30.0) -> CallResult:
-    """The handshake: prove the agent runs and its manifest matches its code."""
-    return call(manifest, CallRequest(capability=DESCRIBE), timeout_s=timeout_s)
+    """The handshake: prove the agent runs and its manifest matches its code.
+
+    Runs with the inherited environment withheld. The handshake is documented
+    everywhere as "no network, no credentials, no cost", and an agent whose
+    `describe` needs a secret is an agent whose `describe` is doing work —
+    which the contract forbids. Withholding it here makes the promise true
+    instead of merely written down.
+    """
+    return call(manifest, CallRequest(capability=DESCRIBE), timeout_s=timeout_s, inherit_env=False)
 
 
 def _budget(request: CallRequest, timeout_s: float | None) -> float:

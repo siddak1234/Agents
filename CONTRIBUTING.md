@@ -24,6 +24,30 @@ Two examples, deliberately at opposite ends:
 Copy the template. Read the reference when you need to see how something is
 done at scale.
 
+## How big is an agent?
+
+Small. The contract costs four files — manifest, entrypoint, tests, README —
+and a finished agent is usually that plus a module or two of real work. This
+is Anthropic's guidance for building on Claude, not just house taste: start
+with the simplest thing that meets the need, keep the tool surface small and
+well-described, add machinery only when a capability demands it.
+
+The rule is about **shape, not line count** (a line count is a proxy this
+repository refuses to use). An agent that needs any of the following is a
+*service wearing an agent's manifest*, and the board blocks it:
+
+- a web server or open port — an agent is called, not booted
+- a database it owns, with migrations
+- Docker, docker-compose, or any "start this first" step
+- a background worker or job queue
+
+Needing one of these is not a sin — it means you are building a service, and
+a service belongs in its own repository, exposing an `agentcall/v1` adapter
+here only if something actually calls it. If a *capability* genuinely
+requires heavy machinery, the burden is on your README to justify it
+per capability, and "the data has to live somewhere" is not a justification —
+that is the caller's problem, or a service's.
+
 ## Adding your agent
 
 **Not using Claude Code?** Read [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md)
@@ -65,7 +89,7 @@ rather than a copy, and `--strict` reporting them is the integration.
 5. **Verify.**
 
    ```bash
-   uv run agents verify           # every gate CI runs, all reported at once
+   uv run agents verify           # every deterministic gate CI runs, at once
    ```
 
    Or individually, when you want one answer rather than all of them:
@@ -113,21 +137,16 @@ ran it alone. Depend on the orchestrator for nothing.
 
 ## Non-negotiable rules
 
-These are enforced by tests and reviewed on every PR.
+The rules live in one place: [`AGENT_PROTOCOL.md` §"Rules an agent must
+follow"](./AGENT_PROTOCOL.md#rules-an-agent-must-follow), plus the
+environment rule in its `agent.yaml` section. This file used to carry its own
+copy with its own numbering; the two drifted, and "rule 5" meant different
+things depending on which file you had open. Cite the protocol's numbers.
 
-1. **stdout carries the envelope and nothing else.** Logs go to stderr. Point
-   `sys.stdout` at stderr before doing any work — this is usually broken by a
-   dependency printing, not by your own code.
-2. **Exit 0 whenever an envelope was produced**, including failures. A
-   business failure is a successful call that returned a failure.
-3. **Validate your own input.** The schemas in `agent.yaml` are documentation;
-   the orchestrator does not enforce them.
-4. **A missing credential returns `unavailable`, never a crash.**
-5. **Declare the environment you need — nothing more.** You receive only what
-   `runtime.env.inherit` names. Do not ask for a variable a capability does
-   not use.
-6. **`describe` must not import heavy dependencies.** It has to answer on a
-   machine that cannot run the rest of you.
+What enforces them: the transport tests pin the stdout rule, the exit-0 rule
+and the deny-by-default environment. The rest — input validation, graceful
+`unavailable`, a light `describe` — are exactly what the review board reads
+your diff for, which is why a reviewer's finding on them is blocking.
 
 ## Opening the PR
 
@@ -146,9 +165,13 @@ findings with the file and the fix.
 `/raise-pr` runs in your own Claude Code session, on your own subscription —
 there is nothing to configure and no key involved.
 
-The same four reviewers run again in CI on the pull request, and *that* run is
-what branch protection enforces. `/raise-pr` is the fast path — a minute
-instead of a push-and-wait — not the gate.
+The same four reviewers run again in CI on the pull request. That run becomes
+the gate only once the repository owner configures two things: a
+`CLAUDE_CODE_OAUTH_TOKEN` secret so the board can authenticate, and branch
+protection requiring the **review board** check. Until then it is advisory —
+and on a fork pull request it cannot run at all, because GitHub withholds
+secrets from forks; a human reads those diffs. `/raise-pr` is the fast path —
+a minute instead of a push-and-wait — not the gate.
 
 CI builds and describes **your agent only**, so a red build is about your work
 and nobody else's. The exception is a change under `orchestrator/`: shared
@@ -178,6 +201,9 @@ You revise and run `/raise-pr` again.
 ## What the board pushes back on
 
 - An agent that needs a server started before it can be called.
+- Service shape in general: an owned database, migrations, Docker, a worker
+  queue — see "How big is an agent?". Blocking unless a capability justifies
+  it in the README.
 - A description that restates the name, or survives from the template.
 - Capabilities in code but not in `agent.yaml`, or the reverse.
 - `runtime.env.inherit` broader than the capabilities justify.

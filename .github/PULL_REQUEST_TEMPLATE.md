@@ -8,12 +8,14 @@ Delete the section that does not apply.
 
 ### Adding or changing an agent
 
-- [ ] `uv run agents list --strict` passes — the integration gate
-- [ ] `uv run agents check <agent>` passes
-- [ ] `uv run pytest` passes
+- [ ] `uv run agents verify` prints `All 9 gates pass` — every deterministic
+      gate CI runs, including the secret scan and your agent's own declared
+      `runtime.lint` and `runtime.test` commands. (The review board in CI is
+      the one check beyond these, and it needs a configured token.)
 - [ ] Folder name, `name:` in `agent.yaml`, and `AGENT_NAME` all match
 - [ ] Description and capabilities are this agent's, not the template's
-- [ ] No `TODO(new agent)` markers left in `agent.yaml`
+- [ ] No `TODO(new agent)` markers left anywhere in the folder — the gate
+      scans every file, not just `agent.yaml`
 - [ ] Every capability in the code is declared in `agent.yaml`, and vice versa
 - [ ] `runtime.env.inherit` names only variables a capability actually uses
 - [ ] Registered in `registry.yaml` and listed in the README table

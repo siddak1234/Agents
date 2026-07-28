@@ -1,16 +1,24 @@
 # realty-lead-gen — developer tasks
 # All targets use `uv` for hermetic Python management. First-time setup: `make setup`.
 
-.PHONY: help setup fmt lint typecheck test test-unit test-integration test-cov \
+.PHONY: help setup hooks fmt lint typecheck test test-unit test-integration test-cov \
         migrate migration-new revision-check api worker shell dev-up dev-down \
         clean docker-build
 
 help:  ## show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-setup:  ## create venv and install all extras + pre-commit hooks
+# NOT `pre-commit install`. This folder shares one .git with the repository,
+# and a git repo holds exactly one pre-commit hook — installing from here
+# rewrites it to point at this folder's config, which silently disables every
+# root gate (secret scan, lint, both integration checks) for all later
+# commits. Proven, not hypothetical. The root config owns the installed hook;
+# this folder's hooks run on demand via `make hooks`.
+setup:  ## create venv and install all extras
 	uv sync --all-extras
-	uv run pre-commit install
+
+hooks:  ## run this folder's pre-commit hooks (does not touch the installed hook)
+	uv run pre-commit run --all-files
 
 # `scripts` is in scope everywhere `src` is. It is small, but
 # `measure_surface.py` is the thing ARCHITECTURE.md's numbers are derived

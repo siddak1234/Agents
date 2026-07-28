@@ -50,7 +50,7 @@ scope. Most of what the review board sends back is decided here, before a
 line of code exists — the worked failure at the end of this page failed on
 *design*, not on code that didn't work.
 
-Answer these seven, in writing, before you scaffold anything. Do not move on
+Answer these eight, in writing, before you scaffold anything. Do not move on
 while an answer is still vague; a vague answer here becomes a blocking
 finding later.
 
@@ -76,6 +76,15 @@ finding later.
 7. **Does it call a model?** If so you also need structured output through a
    tool schema, graceful degradation when the key is absent, and usage
    reported. Decide that now, not later.
+8. **What machinery does your plan need?** The right answer is almost
+   nothing: a finished agent is usually the template's four files plus a
+   module or two of real work. If your plan includes a web server, a
+   database you own, Docker, or a background worker, stop — that is a
+   **service**, not an agent, and the review board blocks service shape.
+   An agent is *called*: one request in, one envelope out, no "start this
+   first" step. Find the capability a caller actually invokes and build
+   that; persistent storage and serving are the caller's problem or a
+   separate system's.
 
 Then write two or three sentences of prose describing the purpose, plus the
 capability list. **That paragraph becomes your `description`** — it is how a
@@ -95,6 +104,9 @@ human, and later a router, picks your agent out of a list.
   data models can safely diverge.
 - You cannot say what a caller does with the output. Then you do not yet
   know what the output should be.
+- Your file list is growing past a dozen and you have not written a
+  capability yet. Size is a symptom, not the offence — but it is the symptom
+  of building a system around the agent instead of the agent.
 
 ### "Isn't this just a function?"
 
@@ -139,14 +151,18 @@ decisions that make it an agent instead of a copy.
 uv run agents verify
 ```
 
-Run this whenever you want to know where you stand. It runs every check CI
-runs and prints all of them at once. **It will fail at first, and the list it
-prints is your to-do list.** When it prints `All 8 gates pass`, you are done.
+Run this whenever you want to know where you stand. It runs every
+deterministic check CI runs and prints all of them at once. **It will fail at
+first, and the list it prints is your to-do list.** When it prints
+`All 9 gates pass`, you are done. (CI has exactly one check beyond these — a
+model-driven review board — and it needs a token the repository owner
+configures.)
 
-The eight, so you know what is being asked of you:
+The nine, so you know what is being asked of you:
 
 | Gate | Asks |
 |---|---|
+| `secret scan` | Did a credential end up in a committed file? (gitleaks) |
 | `ruff format` | Is repository-owned code formatted? |
 | `ruff check` | Is it lint-clean? |
 | `mypy` | Does the orchestrator still type-check? |
@@ -156,9 +172,11 @@ The eight, so you know what is being asked of you:
 | `agents lint` | Does your own declared lint command pass? Root tooling does not check your code. |
 | `agents test` | Does your own declared test command pass, from your folder? |
 
-The last four are about your agent. The first four are about the repository,
+The last four are about your agent. The first five are about the repository,
 and should already pass — if one of them breaks, you changed something
-outside your folder.
+outside your folder (the secret scan being the exception worth respecting:
+it fails on *your* committed credential, and fixing it means removing the
+secret, never editing the scanner).
 
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.
@@ -247,6 +265,15 @@ whose fields you should be echoing back.
 
 These are not style preferences. Each one is a real defect that the review
 board blocks on.
+
+(Maintainers: this list deliberately restates the contract so the page stays
+self-contained for a chat with no repo access. The mapping to
+`AGENT_PROTOCOL.md`: rules 1–4 here are §"Rules an agent must follow" 1–4;
+rule 5 here restates the deny-by-default environment rule from §"What the
+orchestrator guarantees"; rule 6 here is that section's rule 5, "Import
+lazily". The protocol's rule 6 — declare every capability in `agent.yaml` —
+is covered by this page's manifest section instead. Editing any of those
+means editing both files.)
 
 **1. stdout carries the envelope and nothing else.** One stray `print()`, or
 one log line from a library, makes the response unparseable. Point
@@ -349,9 +376,13 @@ prove nothing. `agents check` exists precisely to catch them disagreeing.
 
 ### The skeleton
 
-This is `agent_main.py` as the template ships it. Start from this — it already
-satisfies rules 1, 2 and 3. Replace `greet` with your capability, and move
-anything that is real work into a separate module.
+This is the template's `agent_main.py`, lightly adapted for this page — the
+name is a placeholder and the `RULE n` comments are numbered to match the
+list above, so this copy and that list cannot disagree. Start from this — it
+already satisfies rules 1, 2 and 3. Replace `greet` with your capability, and
+move anything that is real work into a separate module. (If you cloned the
+repo, `uv run agents new my-agent` gives you the same skeleton with the
+renames already done.)
 
 ```python
 #!/usr/bin/env python3

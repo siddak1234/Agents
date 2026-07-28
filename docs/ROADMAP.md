@@ -10,8 +10,14 @@ merged — with each tenant isolated from the others.
 **Today.** A monorepo with a deterministic contract, a local orchestrator, one
 production agent, and a review board that has now run twice — blocking a
 deliberately bad agent and passing a correct one, both locally. It is not yet
-a *gate*: that needs a token and branch protection, both of which need the
-owner. The distance between those two sentences is this document.
+a *gate*: that needs a token, branch protection, **and a decision about how
+contributors arrive** — GitHub withholds secrets from fork pull requests, so
+under the safe `pull_request` trigger this repository uses, the board can
+never run on a fork's PR. (`pull_request_target` would hand secrets to
+unreviewed fork code; `review.yml`'s header explains why that trade is
+refused.) Gating therefore requires contributors pushing branches to this
+repository (collaborators), or a human reading every fork diff. The distance
+between those two sentences is this document.
 
 Status: ✅ done · 🟡 partial · ⬜ not started · 🔒 blocked on a human
 
@@ -38,7 +44,7 @@ advises, and only branch protection plus a token make it decide.
 ## W2 — Guidance while they build
 
 The repository should teach at the moment of the mistake, not in a document
-nobody reopens. Three mechanisms, each doing what only it can.
+nobody reopens. Each mechanism below does what only it can.
 
 | | Item | Mechanism | Status |
 |---|---|---|---|
@@ -46,7 +52,7 @@ nobody reopens. Three mechanisms, each doing what only it can.
 | 2.2 | Contract rules that load when editing a manifest or entrypoint | `.claude/rules/` with `paths:` | ✅ two rules, both path-scoped |
 | 2.3 | Manifest edited → integration check runs and reports | `PostToolUse` hook | ✅ exit 2 on a broken manifest, silent otherwise |
 | 2.4 | Committed team settings so guidance applies to every clone | `.claude/settings.json` | ✅ |
-| 2.5 | The `agents` CLI as the contributor's tool — `list`, `describe`, `call`, `check`, `test` | tool | ✅ |
+| 2.5 | The `agents` CLI as the contributor's tool — `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify` | tool | ✅ |
 | 2.6 | Reference material loaded on demand rather than always | skill supporting files | ⬜ |
 
 **Rules guide, hooks enforce.** A rule is context; a hook exits non-zero. Use
@@ -62,7 +68,7 @@ here exists yet, and most of it is cheap.
 | 3.1 | `CODEOWNERS` mapping each agent folder to its author | Review routing, and one tenant cannot silently edit another's agent | ⬜ |
 | 3.2 | `owner` in `agent.yaml` | The manifest should say whose it is | ⬜ |
 | 3.3 | `version` in `agent.yaml`, and a compatibility policy | Agents change; callers need something to pin | ⬜ |
-| 3.4 | Lifecycle the orchestrator honours — `active`, `deprecated`, `disabled` | `status` exists and nothing reads it | 🟡 |
+| 3.4 | Lifecycle the orchestrator honours — `active`, `deprecated`, `disabled` | No `status` field exists anywhere yet; the README table's Status column is prose nothing reads or validates | ⬜ |
 | 3.5 | Trust tier — `community` vs `verified` | A stranger's agent should not run at first-party privilege | ⬜ |
 | 3.6 | Per-agent resource ceilings — wall clock, memory, output | Timeout and output cap exist; memory does not | 🟡 |
 | 3.7 | Secret scoping proven, not just declared | `env.inherit` is name-level; a shared host needs a provider | 🟡 |
@@ -99,15 +105,35 @@ absent.
 
 ## W6 — Certification alignment
 
-Detail in [`CERTIFICATION_ROADMAP.md`](./CERTIFICATION_ROADMAP.md). Summary:
+This repository doubles as a teaching artifact for the **Claude Certified
+Architect** exam. This table is the only copy — a second one lived in
+`docs/CERTIFICATION_ROADMAP.md` and the two drifted, so that file was folded
+in here.
 
 | Domain | Weight | Status |
 |---|---|---|
-| Agentic Architecture & Orchestration | 27% | ⬜ no agentic loop anywhere |
-| Claude Code Configuration & Workflows | 20% | 🟡 CLAUDE.md, commands, reviewers; W2 closes most of the rest |
-| Prompt Engineering & Structured Output | 20% | ✅ `photo_grader` is the reference |
-| Tool Design & MCP Integration | 18% | 🟡 tool design yes, MCP nothing |
+| Agentic Architecture & Orchestration | 27% | ⬜ no agentic loop anywhere — see the mismatch below |
+| Claude Code Configuration & Workflows | 20% | 🟡 hierarchical CLAUDE.md, skills with frontmatter, path-scoped rules, a PostToolUse hook, four reviewers, the board in CI; remaining: 2.6 |
+| Prompt Engineering & Structured Output | 20% | ✅ `photo_grader` is the reference, its tool schema pinned by a golden-file test |
+| Tool Design & MCP Integration | 18% | 🟡 tool design yes, MCP nothing — neither a server nor a consumer exists |
 | Context Management & Reliability | 15% | ✅ provenance, confidence, human review |
+
+**The mismatch to be honest about.** The exam's Domain 1 means agentic loops:
+coordinator–subagent patterns, context passing, termination on `stop_reason`.
+`agentcall/v1` is single-shot process invocation — the substrate *beneath*
+agentic orchestration, not an example of it. Anyone studying from this repo
+today learns to wire a process boundary cleanly and learns nothing about
+running a loop. Say that out loud until the reference loop agent exists: an
+agent built on the Claude Agent SDK that runs a real gather → act → verify
+loop internally and remains an ordinary `agentcall/v1` leaf to the
+orchestrator — internally agentic, externally a subprocess, which is the
+composition boundary this repo already claims. After it: an MCP server +
+consumer pair, then evaluation and cost (W5).
+
+Exam-shaped exercises, mock questions and curriculum scaffolding are not
+planned. This is a working repository whose practices happen to be the exam's
+subject matter — if it stops being a real repo in order to teach, it teaches
+nothing worth knowing.
 
 ## W7 — Operations
 

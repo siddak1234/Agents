@@ -24,6 +24,8 @@ import re
 import shutil
 from pathlib import Path
 
+import yaml
+
 from orchestrator.discovery import REGISTRY_NAME, TEMPLATE_DIR
 
 #: Lowercase, digits and single hyphens. This becomes a folder name, a YAML
@@ -57,6 +59,7 @@ def create_agent(root: Path, name: str) -> list[str]:
     so a rejected name never leaves a half-made folder behind.
     """
     _validate(root, name)
+    _check_registry_shape(root)
 
     template = root / TEMPLATE_DIR
     if not template.is_dir():
@@ -112,19 +115,72 @@ def _rename(target: Path, name: str) -> str:
     return f"set name to {name!r} in agent.yaml and agent_main.py"
 
 
+def _check_registry_shape(root: Path) -> None:
+    """Refuse to scaffold against a registry the textual append would corrupt.
+
+    `_register` appends `  - path: <name>` to the end of the file, which is
+    only correct when `agents:` is the last top-level key with its entries (or
+    nothing) beneath it. A registry with no `agents:` key at all used to get
+    the entry appended anyway — the file then parsed as a bare list, every
+    later command failed on it, and the scaffolder had already reported
+    "registered" as a success step. Checked before anything is created, so a
+    bad registry never leaves a half-made folder behind.
+    """
+    path = root / REGISTRY_NAME
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ScaffoldError(f"{path}: cannot read: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ScaffoldError(f"{path}: invalid YAML: {exc}") from exc
+    if not isinstance(raw, dict) or "agents" not in raw:
+        raise ScaffoldError(
+            f"{path}: no top-level `agents:` key to register under. "
+            f"Add `agents:` (an empty list is fine), then rerun."
+        )
+
+
 def _register(root: Path, name: str) -> str:
     """Append to registry.yaml textually, preserving its comments.
 
     Round-tripping through PyYAML would reformat the file and drop every
     comment in it, which is a large diff and a real loss for a file whose
     comments explain the discovery-by-declaration rule.
+
+    Textual appends are easy to get subtly wrong, so the candidate text is
+    parsed before anything is written: if the new entry would not land inside
+    `agents:`, the file is left untouched and the step fails instead of
+    "succeeding" with a registry nothing can load.
     """
     path = root / REGISTRY_NAME
     text = path.read_text(encoding="utf-8")
     if re.search(rf"^\s*-\s*path:\s*{re.escape(name)}\s*$", text, re.M):
         return f"{REGISTRY_NAME} already lists {name}"
-    path.write_text(f"{text.rstrip()}\n  - path: {name}\n", encoding="utf-8")
+
+    appended = f"{text.rstrip()}\n  - path: {name}\n"
+    if not _registers_cleanly(appended, name):
+        raise ScaffoldError(
+            f"{path}: appending `- path: {name}` would not land under `agents:` "
+            f"— is `agents:` the last key in the file? Add the entry by hand."
+        )
+    path.write_text(appended, encoding="utf-8")
     return f"registered {name} in {REGISTRY_NAME}"
+
+
+def _registers_cleanly(text: str, name: str) -> bool:
+    """Whether `text` parses and lists `name` under `agents:`."""
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(raw, dict):
+        return False
+    entries = raw.get("agents") or []
+    if not isinstance(entries, list):
+        return False
+    return any(
+        (entry.get("path") if isinstance(entry, dict) else entry) == name for entry in entries
+    )
 
 
 def _add_readme_row(root: Path, name: str) -> str:

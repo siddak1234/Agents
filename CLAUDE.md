@@ -70,17 +70,22 @@ says to.
 
 Work inside its folder and follow *its* conventions. Read the agent's
 `CLAUDE.md` for house rules, its `README.md` for commands, its
-`ARCHITECTURE.md` if it has one. Run its own test and lint commands from its
-folder — there is no root-level runner for agent code.
+`ARCHITECTURE.md` if it has one. Its test and lint commands are its own,
+declared in its manifest — `uv run agents test <name>` and
+`uv run agents lint <name>` run them from the agent's folder, which is also
+what CI does.
 
 ## Verifying a change
 
 ```bash
-uv run agents check      # every agent still answers, and matches its manifest
-uv run pytest            # contract and template
-uv run ruff check orchestrator tests _template
-uv run mypy orchestrator
+uv run agents verify
 ```
+
+One command, running every deterministic gate CI runs — including the format
+check and the secret scan that hand-maintained lists of "the gates" kept
+forgetting. `agents verify` is the contributor-facing definition of the
+gates; the CI workflows run the same set as their own steps, and a gate added
+to one belongs in both.
 
 `agents describe <agent>` against `agents describe <agent> --static` shows
 whether a manifest has drifted from its code — the first runs the agent, the
