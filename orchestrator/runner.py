@@ -61,9 +61,9 @@ def build_env(
     `inherit=False` withholds everything the manifest inherits, leaving only
     the base variables and the committed `env.set` literals. That is the
     handshake's environment: `describe` is documented as costing nothing and
-    needing no credentials, and for years the code quietly disagreed — the
-    handshake received every variable the manifest named, keys included, on
-    every `agents check` in every CI run.
+    needing no credentials, and until this flag existed the code quietly
+    disagreed — the handshake received every variable the manifest named,
+    keys included, on every `agents check` in every CI run.
     """
     env = {key: os.environ[key] for key in BASE_ENV if key in os.environ}
     if inherit:

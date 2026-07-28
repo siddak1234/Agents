@@ -89,7 +89,7 @@ rather than a copy, and `--strict` reporting them is the integration.
 5. **Verify.**
 
    ```bash
-   uv run agents verify           # every gate CI runs, all reported at once
+   uv run agents verify           # every deterministic gate CI runs, at once
    ```
 
    Or individually, when you want one answer rather than all of them:

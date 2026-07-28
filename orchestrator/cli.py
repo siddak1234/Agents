@@ -9,7 +9,8 @@
     agents new <name>
     agents verify [agents…]
 
-`verify` is the contributor's command: every gate CI runs, reported at once.
+`verify` is the contributor's command: every deterministic gate CI runs,
+reported at once. (The review board in CI is model-driven and not here.)
 `check` is the cheap heart of it — it loads every manifest and calls
 `describe` on every agent, which catches a registry that has drifted from
 disk, a broken entrypoint, or a manifest that no longer matches its code.
@@ -327,7 +328,13 @@ def _run_declared(selected: list[AgentManifest], field: str) -> int:
 #: arguments after `python -m`. Invoked through `sys.executable` rather than a
 #: bare command name so it works without `uv` on PATH and cannot pick up a
 #: different interpreter's tools by accident.
+#:
+#: The secret scan is here because "verify runs every deterministic gate CI
+#: runs" is a promise this list has already broken once: gitleaks was added
+#: to CI and not here, and for that window a branch could print "all gates
+#: pass" while carrying a committed credential that CI would reject.
 _TOOL_STEPS = (
+    ("secret scan", ("pre_commit", "run", "gitleaks", "--all-files")),
     ("ruff format", ("ruff", "format", "--check", "orchestrator", "tests", "_template")),
     ("ruff check", ("ruff", "check", "orchestrator", "tests", "_template")),
     ("mypy", ("mypy", "orchestrator")),
@@ -336,7 +343,7 @@ _TOOL_STEPS = (
 
 
 def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
-    """Run every gate CI runs, report all of them, exit non-zero if any failed.
+    """Run every deterministic gate CI runs; exit non-zero if any failed.
 
     Deliberately does not stop at the first failure. A contributor working
     through their first agent wants the whole list — often one root cause
@@ -355,6 +362,12 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
     results: list[tuple[str, str, str]] = []
 
     for label, argv in _TOOL_STEPS:
+        # pre-commit is configuration-driven: with no config at this root
+        # there is nothing to run, which is a SKIP, not a FAIL — a scaffolded
+        # repository without hooks should not be told its secrets leaked.
+        if argv[0] == "pre_commit" and not (registry.root / ".pre-commit-config.yaml").is_file():
+            results.append((label, "SKIP", "no .pre-commit-config.yaml at this root"))
+            continue
         completed = subprocess.run(  # noqa: S603 — fixed argv, no user input
             [sys.executable, "-m", *argv],
             cwd=registry.root,
@@ -559,7 +572,7 @@ def _parser() -> argparse.ArgumentParser:
     p_new.add_argument("name", help="folder and agent name, e.g. parcel-geo")
 
     p_verify = sub.add_parser(
-        "verify", help="run every gate CI runs and report all of them at once"
+        "verify", help="run every deterministic gate CI runs and report all at once"
     )
     p_verify.add_argument(
         "agents",

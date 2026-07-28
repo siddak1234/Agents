@@ -1,9 +1,12 @@
 # realty-lead-gen
 
-Real-estate lead-generation backend. Ingests listings from MLS, portals, and
-off-market sources; enriches each property with Claude-powered condition
-grading, valuation, and comps; scores per persona (flipper / wholesaler /
-buyer's agent); materializes ranked leads into Postgres.
+Real-estate lead-generation backend. Built to ingest listings from MLS,
+portals, and off-market sources; enrich each property with Claude-powered
+condition grading, valuation, and comps; score per persona (flipper /
+wholesaler / buyer's agent); and materialize ranked leads into Postgres.
+Which of those paths are live versus stubbed is exactly what
+`ARCHITECTURE.md`'s status table records — several source adapters are
+stubs, and that table, not this paragraph, is the claim to trust.
 
 Stack: Python 3.13, FastAPI + async SQLAlchemy, Postgres 17 with PostGIS,
 Redis with arq for background jobs, Anthropic SDK for vision and reasoning.

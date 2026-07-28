@@ -29,9 +29,11 @@ if the working tree is dirty. Say which, and stop.
 uv run agents verify
 ```
 
-One command, every gate. This file used to enumerate the commands itself and
-the list drifted — it was missing `agents lint` entirely — which is why the
-gates are defined in `agents verify` and nowhere else.
+One command, every deterministic gate. This file used to enumerate the
+commands itself and the list drifted — it was missing `agents lint` entirely
+— which is why the contributor-facing definition of the gates lives in
+`agents verify`. (The CI workflows necessarily spell out their own steps;
+they run the same set, and a gate added to one belongs in both.)
 
 If it fails: print the output, say what to fix, and **stop without calling the
 board.** There is no sense paying an architect to review a branch that does

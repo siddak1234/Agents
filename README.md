@@ -45,7 +45,7 @@ uv run agents check                           # describe every agent
 uv run agents test                            # run each agent's own tests
 uv run agents lint                            # run each agent's own lint
 uv run agents new <name>                      # scaffold one from the template
-uv run agents verify                          # every gate CI runs, at once
+uv run agents verify                          # every deterministic gate CI runs
 ```
 
 Every call runs the agent as a subprocess **in its own folder, with its own
@@ -66,13 +66,14 @@ database, and its own CI.
 ## Development
 
 ```bash
-uv run agents verify        # every gate CI runs, in one command
+uv run agents verify        # every deterministic gate CI runs, in one command
 uv run pre-commit install   # optional: most of the same gates, per commit
 ```
 
-`agents verify` is the single source of truth for what the gates are — when
-a gate is added it shows up there, not in a doc that has to remember to
-mention it. The pre-commit hooks cover the fast subset (format, lint, types,
+`agents verify` is the contributor-facing definition of the gates — when a
+gate is added it belongs there and in the CI workflows, never only in a doc.
+The one CI check beyond it is the review board, which is model-driven and
+needs a token. The pre-commit hooks cover the fast subset (format, lint, types,
 secret scan, registry checks); the full test suites run in `verify` and CI.
 
 Root tooling covers root-owned code only. Each agent lints and tests itself

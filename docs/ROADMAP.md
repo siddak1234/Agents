@@ -12,10 +12,12 @@ production agent, and a review board that has now run twice — blocking a
 deliberately bad agent and passing a correct one, both locally. It is not yet
 a *gate*: that needs a token, branch protection, **and a decision about how
 contributors arrive** — GitHub withholds secrets from fork pull requests, so
-the board can never run on a fork's PR no matter what is configured. Gating
-requires contributors pushing branches to this repository (collaborators), or
-a human reading every fork diff. The distance between those two sentences is
-this document.
+under the safe `pull_request` trigger this repository uses, the board can
+never run on a fork's PR. (`pull_request_target` would hand secrets to
+unreviewed fork code; `review.yml`'s header explains why that trade is
+refused.) Gating therefore requires contributors pushing branches to this
+repository (collaborators), or a human reading every fork diff. The distance
+between those two sentences is this document.
 
 Status: ✅ done · 🟡 partial · ⬜ not started · 🔒 blocked on a human
 

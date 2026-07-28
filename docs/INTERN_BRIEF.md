@@ -151,14 +151,18 @@ decisions that make it an agent instead of a copy.
 uv run agents verify
 ```
 
-Run this whenever you want to know where you stand. It runs every check CI
-runs and prints all of them at once. **It will fail at first, and the list it
-prints is your to-do list.** When it prints `All 8 gates pass`, you are done.
+Run this whenever you want to know where you stand. It runs every
+deterministic check CI runs and prints all of them at once. **It will fail at
+first, and the list it prints is your to-do list.** When it prints
+`All 9 gates pass`, you are done. (CI has exactly one check beyond these — a
+model-driven review board — and it needs a token the repository owner
+configures.)
 
-The eight, so you know what is being asked of you:
+The nine, so you know what is being asked of you:
 
 | Gate | Asks |
 |---|---|
+| `secret scan` | Did a credential end up in a committed file? (gitleaks) |
 | `ruff format` | Is repository-owned code formatted? |
 | `ruff check` | Is it lint-clean? |
 | `mypy` | Does the orchestrator still type-check? |
@@ -168,9 +172,11 @@ The eight, so you know what is being asked of you:
 | `agents lint` | Does your own declared lint command pass? Root tooling does not check your code. |
 | `agents test` | Does your own declared test command pass, from your folder? |
 
-The last four are about your agent. The first four are about the repository,
+The last four are about your agent. The first five are about the repository,
 and should already pass — if one of them breaks, you changed something
-outside your folder.
+outside your folder (the secret scan being the exception worth respecting:
+it fails on *your* committed credential, and fixing it means removing the
+secret, never editing the scanner).
 
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.
@@ -260,10 +266,14 @@ whose fields you should be echoing back.
 These are not style preferences. Each one is a real defect that the review
 board blocks on.
 
-(Maintainers: this list deliberately restates `AGENT_PROTOCOL.md` §"Rules an
-agent must follow" so the page stays self-contained for a chat with no repo
-access — rules 1–4 share its numbering, 5 is its environment rule, 6 is its
-"import lazily". Editing either file means editing both.)
+(Maintainers: this list deliberately restates the contract so the page stays
+self-contained for a chat with no repo access. The mapping to
+`AGENT_PROTOCOL.md`: rules 1–4 here are §"Rules an agent must follow" 1–4;
+rule 5 here restates the deny-by-default environment rule from §"What the
+orchestrator guarantees"; rule 6 here is that section's rule 5, "Import
+lazily". The protocol's rule 6 — declare every capability in `agent.yaml` —
+is covered by this page's manifest section instead. Editing any of those
+means editing both files.)
 
 **1. stdout carries the envelope and nothing else.** One stray `print()`, or
 one log line from a library, makes the response unparseable. Point
