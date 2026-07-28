@@ -7,7 +7,7 @@ Grades property condition from listing photos on the Fannie Mae UAD scale
 This folder used to hold an entire lead-generation service — FastAPI,
 Postgres, migrations, source adapters, background jobs. That service now
 lives in its own repository (`realty-lead-gen-service`); what remains here
-is the agent: the eleven modules the agentcall entrypoint actually imports,
+is the agent: the eleven modules reachable from the agentcall entrypoint,
 and the tests that cover them. The split is the repository's shape rule
 applied to its own reference agent.
 
@@ -62,10 +62,12 @@ the model; `APP_LOG_LEVEL` / `APP_LOG_FORMAT` shape the stderr logs.
 
 ## Design notes
 
-- **stdout carries the envelope and nothing else.** structlog is pointed at
-  stderr before anything imports it; the entrypoint restores the real stdout
-  only to write the envelope. One stray log line on stdout is a broken
-  response, and this is the trap the adapter exists to avoid.
+- **stdout carries the envelope and nothing else.** The entrypoint rebinds
+  `sys.stdout` to stderr before anything else runs and keeps the real stdout
+  aside, using it only to write the envelope. Everything that prints —
+  structlog, a stray `print`, a chatty dependency — therefore lands on
+  stderr. One stray line on stdout is a broken response; this is the trap
+  the adapter exists to avoid.
 - **`describe` imports nothing heavy.** The `anthropic` import lives inside
   the grading path, so the handshake answers on a machine that cannot
   install the agent's dependencies.

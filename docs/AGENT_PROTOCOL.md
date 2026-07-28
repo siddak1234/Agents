@@ -35,7 +35,7 @@ Written to stdin, which is then closed.
 | `protocol` | yes | Exactly `agentcall/v1`. Reject anything else. |
 | `capability` | yes | Which operation to run. Must be declared in `agent.yaml`. |
 | `input` | yes | Capability-specific object. May be `{}`. |
-| `request_id` | yes | Opaque; echo into logs for correlation. |
+| `request_id` | yes | Always present; opaque. Echo it into your logs for correlation. The orchestrator sends `""` unless a caller supplies one, so treat empty as normal. |
 | `deadline_ms` | no | Advisory budget. The orchestrator enforces it by killing the process — return a `timeout` error before that. |
 
 ## Response
@@ -117,6 +117,13 @@ runtime:
     set: { LOG_FORMAT: json }                         # literals, never secrets
 
 capabilities:
+  # Mandatory. `manifest.py` refuses to load an agent without it, so an
+  # example that omitted it would not be a working example.
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema: { type: object, properties: {} }
+    output_schema: { type: object, required: [name, protocol, capabilities] }
+
   - name: grade_photos
     description: Grade property photos on the Fannie Mae UAD condition scale.
     input_schema: { … }     # JSON Schema — documentation and routing, not enforcement
@@ -128,12 +135,15 @@ capabilities:
 **Working directory is the agent's own folder.** Not configurable. It is why
 an agent's relative paths resolve identically whoever invoked it —
 `realty-lead-gen` reads `env_file=".env"` and defaults every setting, so an
-agent started elsewhere would boot *successfully* on a dev JWT secret and a
-localhost database.
+agent started from the wrong directory would come up *successfully* with
+every credential unset rather than failing loudly. It is also how `uv run`
+finds the right `pyproject.toml`.
 
 **The environment is deny-by-default.** An agent gets `PATH`, `HOME`, `LANG`,
 `LC_ALL`, `TMPDIR`, `TZ` — without which nothing executes, none carrying
-credentials — plus exactly what `runtime.env` names. An agent that grades
+credentials — plus exactly what `runtime.env` names. The `describe` handshake
+is stricter still: it runs with the inherited variables withheld entirely, so
+"costs nothing, needs no credentials" is enforced rather than promised. An agent that grades
 photos has no business reading a database password because the process that
 launched it could.
 

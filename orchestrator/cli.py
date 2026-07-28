@@ -28,6 +28,7 @@ from typing import Any
 
 from orchestrator.contract import DESCRIBE, CallRequest, CallResult
 from orchestrator.discovery import (
+    AGENTS_DIR,
     DiscoveryError,
     Registry,
     integration_problems,
@@ -75,7 +76,7 @@ def _cmd_new(registry: Registry, args: argparse.Namespace) -> int:
     for step in done:
         print(f"  {step}")
     print(
-        f"\nNext, in {args.name}/:\n"
+        f"\nNext, in {AGENTS_DIR}/{args.name}/:\n"
         f"  1. agent.yaml — write the description and your real capabilities,\n"
         f"     each with an input and an output schema. Point runtime.lint at\n"
         f"     real linting once you have dependencies; nothing else checks\n"
@@ -362,12 +363,18 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
     results: list[tuple[str, str, str]] = []
 
     for label, argv in _TOOL_STEPS:
-        # pre-commit is configuration-driven: with no config at this root
-        # there is nothing to run, which is a SKIP, not a FAIL — a scaffolded
-        # repository without hooks should not be told its secrets leaked.
-        if argv[0] == "pre_commit" and not (registry.root / ".pre-commit-config.yaml").is_file():
-            results.append((label, "SKIP", "no .pre-commit-config.yaml at this root"))
-            continue
+        # pre-commit is configuration-driven and git-driven: with no config,
+        # or outside a git repository, there is nothing it can scan. Both are
+        # a SKIP, not a FAIL — a gate that could not run is not a gate that
+        # found something, and telling someone their secrets leaked because
+        # they have not run `git init` sends them hunting for nothing.
+        if argv[0] == "pre_commit":
+            if not (registry.root / ".pre-commit-config.yaml").is_file():
+                results.append((label, "SKIP", "no .pre-commit-config.yaml at this root"))
+                continue
+            if not (registry.root / ".git").exists():
+                results.append((label, "SKIP", f"{registry.root} is not a git repository"))
+                continue
         completed = subprocess.run(  # noqa: S603 — fixed argv, no user input
             [sys.executable, "-m", *argv],
             cwd=registry.root,
@@ -393,9 +400,10 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
         results.append((label, *handler(registry, args)))
 
     failed = [r for r in results if r[1] == "FAIL"]
+    skipped = [r for r in results if r[1] == "SKIP"]
     for label, status, output in results:
         print(f"{status:<4}  {label}")
-        if status == "FAIL" and output:
+        if status in ("FAIL", "SKIP") and output:
             print("\n".join(f"        {line}" for line in output.splitlines()[:40]))
 
     if failed:
@@ -405,6 +413,19 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # A skipped gate is not a passing gate. Reporting "All 9 gates pass" when
+    # one of them never ran is the same false assurance as a green tick from a
+    # review that did not happen — and CI does not skip, so the contributor
+    # would find out there anyway, later and with less context.
+    if skipped:
+        names = ", ".join(label for label, _, _ in skipped)
+        print(
+            f"\n{len(results) - len(skipped)} of {len(results)} gates pass; "
+            f"{len(skipped)} did not run ({names}). CI runs all of them, so "
+            f"this is not yet the same answer CI will give."
+        )
+        return 0
     print(f"\nAll {len(results)} gates pass.")
     return 0
 

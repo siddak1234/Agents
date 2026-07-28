@@ -12,7 +12,7 @@ Get the change with `git diff origin/main...HEAD` (read-only git only). If the
 agent never calls a model, say so, return `pass` with no findings, and stop —
 do not invent work.
 
-`realty-lead-gen/src/realty_lead_gen/agents/photo_grader.py` is this
+`agents/realty-lead-gen/src/realty_lead_gen/agents/photo_grader.py` is this
 repository's reference for every point below. Compare against it.
 
 ## Your lens
@@ -23,7 +23,7 @@ formats stated. Enough detail that the caller does not have to guess.
 
 **Structured output.** Enforced through a tool schema rather than parsed out
 of prose. The schema pinned by a test, so an edit to it is a deliberate act —
-`tests/golden/photo_grader_tool_schema.json` is the pattern.
+`agents/realty-lead-gen/tests/golden/photo_grader_tool_schema.json` is the pattern.
 
 **Prompting.** Explicit criteria rather than a vague instruction. A rubric or
 scale where the task has one. Few-shot examples where the output shape is not

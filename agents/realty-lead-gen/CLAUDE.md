@@ -48,9 +48,12 @@ change both, then run `uv run agents check` from the repository root.
 
 The two traps it exists to avoid, both easy to reintroduce:
 
-- `configure_logging` sends structlog to **stdout** (`logging.py`). The
-  adapter repoints `sys.stdout` at stderr before anything runs, because one
-  log line on stdout makes the response envelope unparseable.
+- Anything that prints goes to **stdout** by default, and one stray line
+  there makes the response envelope unparseable. `main` repoints
+  `sys.stdout` at stderr before anything else runs, and `configure_logging`
+  is deliberately called *after* that — its `basicConfig(stream=sys.stdout)`
+  resolves stdout at call time, so the order is what keeps logs off the
+  wire.
 - `describe` must answer without importing `anthropic` or settings, so keep
   those imports inside the capability that needs them.
 

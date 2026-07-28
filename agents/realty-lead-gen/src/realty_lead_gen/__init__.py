@@ -1,22 +1,18 @@
-"""realty-lead-gen — agentic real-estate lead generation backend.
+"""realty-lead-gen — photo-condition grading over agentcall/v1.
 
 Package layout:
-    config       - typed application settings (pydantic-settings)
-    db           - async SQLAlchemy engine + session helpers
-    logging      - structlog + OpenTelemetry setup
-    models       - SQLAlchemy ORM (write side)
-    schemas      - Pydantic v2 DTOs (API + inter-layer)
-    sources      - ingestion adapters (MLS, portals, off-market)
-    enrichment   - photo grading, AVM, comps, skip trace, signals
-    scoring      - per-persona scoring models (flipper, wholesaler, agent)
-    matching     - buyer <-> property matching
-    agents       - Claude Agent SDK usages (reasoning + vision)
-    pipeline     - normalize / dedup / orchestrate the DAG
-    api          - FastAPI routers + dependencies + auth + middleware
-    jobs         - arq job definitions
-    utils        - address hashing, geo, money, retry helpers
+    agentcall  - the wire adapter: one JSON request in, one envelope out
+    agents     - Claude usage (the vision grader and its client)
+    config     - typed settings (pydantic-settings)
+    logging    - structlog setup
+    utils      - HTTP status triage, retry policy, JSON typing
 
-The public entrypoints are `main:app` (FastAPI) and `worker:WorkerSettings` (arq).
+The public entrypoint is `agentcall:main`, declared in `agent.yaml` and
+invoked by the orchestrator as a subprocess.
+
+The lead-generation service this grew out of — FastAPI app, Postgres models,
+ingestion adapters, scoring, background jobs — lives in its own repository.
+Its modules used to be listed here; they are not coming back (see CLAUDE.md).
 """
 
 from __future__ import annotations

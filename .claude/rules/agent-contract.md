@@ -3,7 +3,7 @@ paths:
   - "**/agent.yaml"
   - "**/agent_main.py"
   - "**/agentcall.py"
-  - "_template/**"
+  - "agents/_template/**"
 ---
 
 # Editing an agent

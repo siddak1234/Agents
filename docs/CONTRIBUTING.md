@@ -18,15 +18,16 @@ Two examples, deliberately at opposite ends:
 
 | | What it shows |
 |---|---|
-| [`_template/`](./_template) | The skeleton. ~100 lines, standard library, runs with no install. **Start here.** |
-| [`realty-lead-gen/`](./agents/realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
+| [`_template/`](../agents/_template) | The skeleton. ~100 lines, standard library, runs with no install. **Start here.** |
+| [`realty-lead-gen/`](../agents/realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
 
 Copy the template. Read the reference when you need to see how something is
 done at scale.
 
 ## How big is an agent?
 
-Small. The contract costs four files — manifest, entrypoint, tests, README —
+Small. The contract costs five files — manifest, entrypoint, tests, README,
+LICENSE —
 and a finished agent is usually that plus a module or two of real work. This
 is Anthropic's guidance for building on Claude, not just house taste: start
 with the simplest thing that meets the need, keep the tool surface small and
@@ -50,7 +51,7 @@ that is the caller's problem, or a service's.
 
 ## Adding your agent
 
-**Not using Claude Code?** Read [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md)
+**Not using Claude Code?** Read [`INTERN_BRIEF.md`](./INTERN_BRIEF.md)
 instead of this section. It is self-contained and written to be pasted into a
 Claude conversation, which is what gives a chat assistant any idea what
 `agentcall/v1` is — without it, it will invent something plausible and wrong.

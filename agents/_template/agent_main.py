@@ -95,7 +95,7 @@ def dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
         )
 
     if capability == "greet":
-        # RULE 3: validate your own input and say precisely what was wrong. The
+        # RULE 4: validate your own input and say precisely what was wrong. The
         # orchestrator does not validate for you — the schema in agent.yaml is
         # documentation, and two validators would drift.
         who = payload.get("name", "world")
@@ -107,10 +107,10 @@ def dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
     return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
 
-# RULE 4: a missing credential or unreachable dependency returns
-# `unavailable`, never a crash. See realty-lead-gen's agentcall.py for a real
-# example — no ANTHROPIC_API_KEY disables photo grading instead of killing the
-# process. The five error types are: invalid_request, unavailable, timeout,
+# RULE 3: a missing credential or unreachable dependency returns
+# `unavailable`, never a crash. See agents/realty-lead-gen/'s agentcall.py for
+# a real example — no ANTHROPIC_API_KEY disables photo grading instead of
+# killing the process. The five error types are: invalid_request, unavailable, timeout,
 # internal, transport (transport is orchestrator-side; agents never emit it).
 
 

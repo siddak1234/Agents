@@ -52,7 +52,7 @@ End your reply with exactly one fenced json block and nothing after it:
   "reviewer": "agent-architect",
   "verdict": "pass",
   "findings": [
-    {"severity": "blocking", "where": "weather-agent/agent.yaml", "problem": "...", "fix": "..."}
+    {"severity": "blocking", "where": "agents/weather-agent/agent.yaml", "problem": "...", "fix": "..."}
   ]
 }
 ```

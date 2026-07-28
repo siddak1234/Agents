@@ -19,13 +19,14 @@ class PermanentError(Exception):
 
     Self-describing by contract: `raise_for_vendor_status` puts the vendor,
     the status code, and a bounded excerpt of the response body into the
-    message. That is why the handlers that catch it log with `logger.error`
-    and a `# noqa: TRY400` rather than `logger.exception` — the traceback
-    would only point back at the `raise` two frames up, and attaching one to
-    every routine "this vendor has no data for this address" would bury the
-    real stack traces in the same log stream. `TransientError` is different:
-    it is retried, and only surfaces after `default_retry` gives up, at
-    which point `logger.exception` *is* correct.
+    message, so a handler can log it without a traceback — the stack would
+    only point back at the `raise` two frames up. `TransientError` is
+    different: it is retried, and only surfaces after `default_retry` gives
+    up, at which point a traceback is worth having.
+
+    No handler for either lives in this agent today; both left with the
+    service. They are kept as the policy an outbound call added here should
+    follow.
     """
 
 

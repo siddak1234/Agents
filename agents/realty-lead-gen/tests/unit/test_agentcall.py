@@ -73,7 +73,16 @@ def _patch_grading(
                 raise error
             return _fake_result()
 
-    monkeypatch.setattr(config_module, "get_settings", SimpleNamespace)
+    # A bare SimpleNamespace was enough while nothing read a settings field.
+    # `_grade_photos` now configures logging from `app_log_level` /
+    # `app_log_format`, so the stub has to carry the fields the real Settings
+    # has — a stub thinner than the type it stands in for passes for the wrong
+    # reason.
+    monkeypatch.setattr(
+        config_module,
+        "get_settings",
+        lambda: SimpleNamespace(app_log_level="INFO", app_log_format="json"),
+    )
     monkeypatch.setattr(claude_client_module, "ClaudeClient", FakeClient)
     monkeypatch.setattr(photo_grader_module, "PhotoGrader", FakeGrader)
 

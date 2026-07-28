@@ -5,8 +5,7 @@
 # git root regardless of where it is invoked, so without `files:` these hooks
 # would receive root-owned code too. That prefix is load-bearing and easy to
 # break: moving this folder under agents/ left it reading `^realty-lead-gen/`,
-# and all twelve hooks silently reported "no files to check" until it was
-# fixed. If this folder is ever extracted to its own repository, drop `files:`
+# and every hook silently reported "no files to check" until it was fixed. If this folder is ever extracted to its own repository, drop `files:`
 # entirely — the folder becomes the git root.
 #
 # No ruff here on purpose: `make lint` and the manifest's `runtime.lint` both

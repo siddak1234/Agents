@@ -33,8 +33,8 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered
 agent has no row here — it cannot catch a stale Status cell, so treat that
-column as prose, not telemetry. The machine-readable list is
-`uv run agents list`.
+column as prose, not telemetry. For machine-readable output — which is what
+CI reads to work out its scope — use `uv run agents list --json`.
 
 ## Calling an agent
 
@@ -61,8 +61,9 @@ credentials it never declared.
 [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md). Building from claude.ai chat instead
 of Claude Code? [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the
 self-contained version — paste it into a chat and it carries the whole
-contract with it. Two examples exist on purpose: `_template/` is the
-skeleton, `realty-lead-gen/` is a worked reference that calls a model —
+contract with it. Two examples exist on purpose: `agents/_template/` is
+the skeleton, `agents/realty-lead-gen/` is a worked reference that calls a
+model —
 structured output, graceful degradation, its own locked dependencies.
 
 ## Development
@@ -85,8 +86,9 @@ applies to dependencies.
 ## CI
 
 Workflows live in `.github/workflows/` at the root, because GitHub Actions
-does not discover workflows nested inside a directory. Each agent's pipeline
-is scoped with a `paths:` filter.
+does not discover workflows nested inside a directory. Both run on every pull
+request; the per-agent work inside them is scoped at runtime by diffing
+against the base, not by a `paths:` filter.
 
 | Workflow | Runs on | Gate |
 |---|---|---|
@@ -139,5 +141,5 @@ non-zero and has to be dealt with.
 ## Licensing
 
 No repository-wide license. Each agent folder carries its own;
-`realty-lead-gen/LICENSE` is proprietary. A new agent should ship an explicit
+`agents/realty-lead-gen/LICENSE` is proprietary. A new agent should ship an explicit
 `LICENSE` rather than inherit an assumption.

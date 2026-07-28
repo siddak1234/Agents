@@ -118,8 +118,15 @@ def _grade_photos(payload: dict[str, Any]) -> dict[str, Any]:
     from realty_lead_gen.agents.claude_client import ClaudeClient
     from realty_lead_gen.agents.photo_grader import PhotoGrader
     from realty_lead_gen.config import get_settings
+    from realty_lead_gen.logging import configure_logging
 
     settings = get_settings()
+    # Here rather than in `main`: this is the first point settings are loaded,
+    # and `describe` must answer without importing them. Safe on stdout —
+    # `main` has already repointed it at stderr, so structlog's stream lands
+    # there too. Without this call APP_LOG_LEVEL and APP_LOG_FORMAT are
+    # declared in the manifest, documented in .env.example, and do nothing.
+    configure_logging(settings)
     claude = ClaudeClient(settings)
     if not claude.available:
         # The house rule: a missing credential disables a capability, it does
@@ -129,7 +136,7 @@ def _grade_photos(payload: dict[str, Any]) -> dict[str, Any]:
             cap,
             "unavailable",
             "ANTHROPIC_API_KEY is not set; photo grading is disabled. "
-            "Set it in realty-lead-gen/.env",
+            "Set it in agents/realty-lead-gen/.env",
             retryable=False,
         )
 

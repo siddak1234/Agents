@@ -1,16 +1,17 @@
 """Shared status-code triage for outbound vendor HTTP calls.
 
-Three adapters — RapidAPI/Zillow, RentCast valuation, RentCast comps — each
-grew their own copy of "which status codes are worth retrying", and the
-copies had already drifted: one gave 429 and 5xx separate branches, another
-merged them, one classified 401/403 as auth failures and another lumped them
-into the generic 4xx bucket. Since `default_retry` only retries
-`TransientError`, that drift *is* the retry policy — a status classified
-wrong in one adapter silently gets a different number of attempts than the
-same status in the next adapter.
+Written when three vendor adapters had each grown their own copy of "which
+status codes are worth retrying", and the copies had drifted: one gave 429
+and 5xx separate branches, another merged them, one classified 401/403 as
+auth failures and another lumped them into the generic 4xx bucket. Since
+`default_retry` only retries `TransientError`, that drift *is* the retry
+policy — the same status silently got a different number of attempts
+depending on which adapter hit it.
 
-Centralizing it makes the contract one thing that is true everywhere, and a
-new adapter inherits it rather than re-deriving it. Codes are named through
+Those adapters left with the service, so nothing in this agent calls
+`raise_for_vendor_status` today; it stays as the policy any future outbound
+call here should inherit rather than re-derive, and its tests keep it
+honest. Codes are named through
 `http.HTTPStatus` rather than as bare integers so the intent is legible at
 the call site and the numbers cannot drift from their meanings.
 """

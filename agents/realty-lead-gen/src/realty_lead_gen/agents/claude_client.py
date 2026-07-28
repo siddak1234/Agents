@@ -2,10 +2,10 @@
 
 Centralizes:
     * client lifecycle (single async client per process)
-    * cost accounting (input/output tokens -> USD micros)
+    * cost accounting (input/output tokens -> USD micros), reported in the
+      envelope's `usage` — recorded, never enforced: nothing here caps spend
     * unified error mapping (transient vs permanent)
-    * structured logging + trace context
-    * hard per-call spend caps
+    * structured logging
 
 The concrete rate table lives here so we do not scatter magic numbers.
 Update when Anthropic publishes new pricing.

@@ -1,8 +1,15 @@
 """Structured logging setup.
 
-Uses structlog with JSON output in production and pretty console output
-in development. Bound context (request_id, user_id, property_id, ...)
-survives across `await` boundaries via structlog's contextvars.
+Renderer is chosen by `APP_LOG_FORMAT` — `json` (the default) or `console`
+for a readable local run. Not by environment: `app_env` is not consulted
+here. Bound context survives across `await` boundaries via structlog's
+contextvars.
+
+`configure_logging` is called from the grading path in `agentcall.py`, after
+the entrypoint has already repointed `sys.stdout` at stderr. That ordering
+is load-bearing: `basicConfig(stream=sys.stdout)` below resolves stdout at
+call time, so calling this any earlier would put log lines on the real
+stdout and make the response envelope unparseable.
 """
 
 from __future__ import annotations

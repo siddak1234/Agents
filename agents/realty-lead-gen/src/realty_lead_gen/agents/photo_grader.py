@@ -1,18 +1,21 @@
 """Vision-LLM photo grader.
 
 Design:
-    * Two-stage: cheap model triages room type + informativeness, then
-      the reasoning model grades condition + itemizes repairs. See
-      research findings for the rationale (Fannie Mae UAD 3.6, ~90%
-      Restb.ai agreement with appraisers).
-    * Output is structured via Anthropic tool-use so schema violations
-      are caught + retried at the API boundary.
+    * One call, one model: `settings.anthropic_model_vision` grades a batch
+      of photos and itemizes repairs against the Fannie Mae UAD 3.6 scale.
+      (A two-stage triage-then-grade design was planned and is not built.)
+    * Output is structured via Anthropic tool-use, so the model returns a
+      typed payload rather than prose to parse. Note what this does NOT do:
+      nothing validates the payload against the schema on the way back, so a
+      missing key raises rather than degrading — see `_from_tool_payload`.
     * Every finding cites at least one photo id (evidence). LLM-only
       inferences without an explicit evidence tie are flagged as
       low-confidence.
 
-Prompt version pinned in the module — bump when semantic behavior
-changes so old rows can be re-scored deterministically.
+`PROMPT_VERSION` is pinned in the module so a semantic change to the prompt
+is a deliberate, visible edit. It is not currently reported in the envelope;
+a caller that needs to attribute a grade to a prompt version would have to
+add it to the output schema first.
 """
 
 from __future__ import annotations
