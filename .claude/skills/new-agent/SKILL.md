@@ -48,6 +48,12 @@ blocking finding later.
 7. **Does it call a model?** If so, the `anthropic-practice` reviewer applies
    — structured output through a tool schema, graceful degradation without a
    key, usage reported. Say so now.
+8. **What machinery does it need?** If the honest answer includes a web
+   server, a database it owns, Docker, or a worker queue, stop the interview
+   there: that is a service, not an agent, and the board blocks service
+   shape (CONTRIBUTING.md, "How big is an agent?"). Help them find the
+   agent-sized core — the capability a caller actually invokes — and say
+   plainly that the rest belongs in its own repository.
 
 Then **write the answers back as prose** — two or three sentences on purpose
 and a list of capabilities — and get agreement before touching the filesystem.
@@ -59,24 +65,26 @@ later a router, picks this agent.
 Only now:
 
 ```bash
-cp -r _template <agent-name>
+uv run agents new <agent-name>
 ```
+
+That does the mechanical half — copies the template, sets the name in the two
+files that must agree, registers it in `registry.yaml`, adds the README row —
+and deliberately leaves the thinking half alone. (This skill used to say
+`cp -r _template` and list the registration steps by hand, duplicating the
+shipped command it was supposed to teach.)
 
 Then work through every `TODO(new agent)` marker using the interview answers:
 
-- `agent.yaml` — `name` matching the folder, the description you agreed,
-  capabilities with real input and output schemas, `runtime.env.inherit`
-  naming only what is justified
-- `agent_main.py` — `AGENT_NAME`, the capabilities replacing `greet`,
-  validation for each input, the error types chosen in question 5
+- `agent.yaml` — the description you agreed, capabilities with real input and
+  output schemas, `runtime.env.inherit` naming only what is justified
+- `agent_main.py` — the capabilities replacing `greet`, validation for each
+  input, the error types chosen in question 5
 - `tests/test_agent.py` — keep `TestContract`, replace `TestGreet` with tests
   for the real capability including its failure paths
 - `README.md` — what it does, how to run it, how to configure it
 - `LICENSE` — the template ships none on purpose. Ask which licence; do not
   choose one for them
-
-Register it: add `- path: <agent-name>` to `registry.yaml` and a row to the
-README table.
 
 ## 4. Prove it
 
@@ -105,6 +113,8 @@ the thing before it is reviewed.
 - The purpose is still "it calls the X API".
 - The capability list is one capability doing everything.
 - It duplicates an existing agent and the author has not addressed why.
+- The plan is service-shaped — a server, an owned database, Docker, a queue —
+  and question 8 did not find an agent-sized core.
 
 Say which, and go back to the question that was not answered. Scaffolding
 around an unclear purpose produces a folder that has to be deleted later, and

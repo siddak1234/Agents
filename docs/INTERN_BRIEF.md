@@ -50,7 +50,7 @@ scope. Most of what the review board sends back is decided here, before a
 line of code exists — the worked failure at the end of this page failed on
 *design*, not on code that didn't work.
 
-Answer these seven, in writing, before you scaffold anything. Do not move on
+Answer these eight, in writing, before you scaffold anything. Do not move on
 while an answer is still vague; a vague answer here becomes a blocking
 finding later.
 
@@ -76,6 +76,15 @@ finding later.
 7. **Does it call a model?** If so you also need structured output through a
    tool schema, graceful degradation when the key is absent, and usage
    reported. Decide that now, not later.
+8. **What machinery does your plan need?** The right answer is almost
+   nothing: a finished agent is usually the template's four files plus a
+   module or two of real work. If your plan includes a web server, a
+   database you own, Docker, or a background worker, stop — that is a
+   **service**, not an agent, and the review board blocks service shape.
+   An agent is *called*: one request in, one envelope out, no "start this
+   first" step. Find the capability a caller actually invokes and build
+   that; persistent storage and serving are the caller's problem or a
+   separate system's.
 
 Then write two or three sentences of prose describing the purpose, plus the
 capability list. **That paragraph becomes your `description`** — it is how a
@@ -95,6 +104,9 @@ human, and later a router, picks your agent out of a list.
   data models can safely diverge.
 - You cannot say what a caller does with the output. Then you do not yet
   know what the output should be.
+- Your file list is growing past a dozen and you have not written a
+  capability yet. Size is a symptom, not the offence — but it is the symptom
+  of building a system around the agent instead of the agent.
 
 ### "Isn't this just a function?"
 

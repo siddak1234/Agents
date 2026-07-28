@@ -24,6 +24,30 @@ Two examples, deliberately at opposite ends:
 Copy the template. Read the reference when you need to see how something is
 done at scale.
 
+## How big is an agent?
+
+Small. The contract costs four files — manifest, entrypoint, tests, README —
+and a finished agent is usually that plus a module or two of real work. This
+is Anthropic's guidance for building on Claude, not just house taste: start
+with the simplest thing that meets the need, keep the tool surface small and
+well-described, add machinery only when a capability demands it.
+
+The rule is about **shape, not line count** (a line count is a proxy this
+repository refuses to use). An agent that needs any of the following is a
+*service wearing an agent's manifest*, and the board blocks it:
+
+- a web server or open port — an agent is called, not booted
+- a database it owns, with migrations
+- Docker, docker-compose, or any "start this first" step
+- a background worker or job queue
+
+Needing one of these is not a sin — it means you are building a service, and
+a service belongs in its own repository, exposing an `agentcall/v1` adapter
+here only if something actually calls it. If a *capability* genuinely
+requires heavy machinery, the burden is on your README to justify it
+per capability, and "the data has to live somewhere" is not a justification —
+that is the caller's problem, or a service's.
+
 ## Adding your agent
 
 **Not using Claude Code?** Read [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md)
@@ -177,6 +201,9 @@ You revise and run `/raise-pr` again.
 ## What the board pushes back on
 
 - An agent that needs a server started before it can be called.
+- Service shape in general: an owned database, migrations, Docker, a worker
+  queue — see "How big is an agent?". Blocking unless a capability justifies
+  it in the README.
 - A description that restates the name, or survives from the template.
 - Capabilities in code but not in `agent.yaml`, or the reverse.
 - `runtime.env.inherit` broader than the capabilities justify.
