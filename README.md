@@ -28,7 +28,11 @@ orchestrator knows about any agent.
 |---|---|---|
 | [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
 
-`uv run agents list` prints this from the manifests, so it is never stale.
+This table is maintained by hand (and by `agents new`, which adds a row).
+What keeps it honest is `agents list --strict`, which fails when a registered
+agent has no row here — it cannot catch a stale Status cell, so treat that
+column as prose, not telemetry. The machine-readable list is
+`uv run agents list`.
 
 ## Calling an agent
 
@@ -51,19 +55,25 @@ credentials it never declared.
 
 ## Adding an agent
 
-`cp -r _template my-agent`, then follow
-[`CONTRIBUTING.md`](./CONTRIBUTING.md). Two examples exist on purpose:
-`_template/` is the skeleton, `realty-lead-gen/` is a worked reference with
-real dependencies, a database, and its own CI.
+`uv run agents new my-agent`, then follow
+[`CONTRIBUTING.md`](./CONTRIBUTING.md). Building from claude.ai chat instead
+of Claude Code? [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the
+self-contained version — paste it into a chat and it carries the whole
+contract with it. Two examples exist on purpose: `_template/` is the
+skeleton, `realty-lead-gen/` is a worked reference with real dependencies, a
+database, and its own CI.
 
 ## Development
 
 ```bash
-uv run pytest                                          # contract + template
-uv run ruff check orchestrator tests _template
-uv run mypy orchestrator                               # strict
-uv run pre-commit install                              # optional, runs the above
+uv run agents verify        # every gate CI runs, in one command
+uv run pre-commit install   # optional: most of the same gates, per commit
 ```
+
+`agents verify` is the single source of truth for what the gates are — when
+a gate is added it shows up there, not in a doc that has to remember to
+mention it. The pre-commit hooks cover the fast subset (format, lint, types,
+secret scan, registry checks); the full test suites run in `verify` and CI.
 
 Root tooling covers root-owned code only. Each agent lints and tests itself
 from its own folder, with its own configuration — the same isolation that
@@ -77,21 +87,25 @@ is scoped with a `paths:` filter.
 
 | Workflow | Runs on | Gate |
 |---|---|---|
-| `orchestrator.yml` | every change | ruff, strict mypy, registry validation, contract and template tests, then `agents check` |
+| `orchestrator.yml` | every change | secret scan, ruff, strict mypy, registry validation, contract and template tests; then, per agent in scope: `agents check`, `agents lint`, `agents test` |
 | `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy, unit tests, integration against real Postgres and Redis, coverage gate |
-| `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Authenticates with `CLAUDE_CODE_OAUTH_TOKEN` (your Claude subscription, via `claude setup-token`) or `ANTHROPIC_API_KEY`; warns and skips with neither |
+| `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Authenticates with `CLAUDE_CODE_OAUTH_TOKEN` (your Claude subscription, via `claude setup-token`) or `ANTHROPIC_API_KEY`; warns and skips with neither. Advisory until it is required in branch protection — and fork pull requests never receive secrets, so on a fork the board cannot run at all and a human reads the diff |
 
-`agents check` calls `describe` on an agent — no network, no credentials, no
-cost — and compares what the agent reports against its manifest. A capability
-declared and not implemented, or implemented and not declared, fails here.
-`agents test` then runs the agent's own declared test command in its own
-folder, so a contributed agent's tests actually execute.
+`agents check` calls `describe` on an agent — no network, no cost, and the
+handshake runs with inherited credentials withheld — and compares what the
+agent reports against its manifest. A capability declared and not
+implemented, or implemented and not declared, fails here. `agents lint` and
+`agents test` then run the agent's own declared commands in its own folder,
+so a contributed agent's source and tests are actually checked.
 
-**It is scoped to what changed.** A pull request adding one agent builds and
-describes that agent only; it does not build every other agent, and it cannot
-go red because someone else's agent is broken. Changing `orchestrator/` or
-the root project does sweep every agent, because shared code can break any of
-them. A documentation-only change skips the job entirely.
+**The agent steps are scoped to what changed.** A pull request adding one
+agent builds and describes that agent only; it does not build every other
+agent, and it cannot go red because someone else's agent is broken. Changing
+`orchestrator/` or the root project does sweep every agent, because shared
+code can break any of them. A root documentation-only change still runs the
+cheap contract job, but every agent step is skipped; documentation inside an
+agent's folder triggers that agent's own pipeline, because its coverage gate
+cannot know the change was prose.
 
 Registry integrity is checked separately and statically by
 `agents list --strict`, which costs nothing and catches the mistake new
@@ -103,20 +117,19 @@ agent would merge green and simply never be callable.
 
 [`docs/ROADMAP.md`](./docs/ROADMAP.md) is where this repository is going —
 the contribution funnel, the guidance surface, multi-tenancy, runtime,
-evaluation, and what is deliberately not being built yet.
-[`docs/CERTIFICATION_ROADMAP.md`](./docs/CERTIFICATION_ROADMAP.md) is one
-workstream of it in detail.
+evaluation, certification alignment, and what is deliberately not being
+built yet.
 
 ## How the repository guides you
 
-Three mechanisms, each doing what only it can:
+Four mechanisms, each doing what only it can:
 
 | | Does |
 |---|---|
-| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding |
+| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding; `/raise-pr` runs the gates, then the board, then opens the PR |
 | **Rules** (`.claude/rules/`) | Load automatically when you edit a manifest, an entrypoint, or shared code — contract reminders at the moment they apply |
 | **Hooks** (`.claude/settings.json`) | Edit a manifest and the integration gate runs; a half-finished agent is reported before you get further |
-| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check` — the same commands CI runs |
+| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify` — the same commands CI runs |
 
 Rules guide, hooks enforce. A rule is context you may act on; a hook exits
 non-zero and has to be dealt with.

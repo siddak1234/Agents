@@ -1,11 +1,16 @@
 """`agents` — the command-line face of the orchestrator.
 
-    agents list
-    agents describe <agent>
+    agents list [--strict] [--json]
+    agents describe <agent> [--static]
     agents call <agent> <capability> [--input JSON | --input-file PATH]
-    agents check
+    agents check [agents…]
+    agents test [agents…]
+    agents lint [agents…]
+    agents new <name>
+    agents verify [agents…]
 
-`check` is the one to run in CI: it loads every manifest and calls
+`verify` is the contributor's command: every gate CI runs, reported at once.
+`check` is the cheap heart of it — it loads every manifest and calls
 `describe` on every agent, which catches a registry that has drifted from
 disk, a broken entrypoint, or a manifest that no longer matches its code.
 """

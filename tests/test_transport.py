@@ -496,3 +496,20 @@ def test_usage_may_report_zeros_when_nothing_was_spent():
     """The whole point of mandatory accounting is that zero is a real answer."""
     result = CallResult.decode(_envelope(usage={}), capability="x")
     assert (result.usage.input_tokens, result.usage.cost_micros) == (0, 0)
+
+
+def test_an_agent_cannot_emit_a_transport_error():
+    """`transport` is the orchestrator's word, and only the orchestrator's.
+
+    AGENT_PROTOCOL.md says agents never emit it, but because it sat in
+    ERROR_TYPES an agent could — and its envelope was indistinguishable from
+    an orchestrator-side failure, which is the one distinction the taxonomy
+    exists to hold. An agent-emitted `transport` now demotes to `internal`
+    with the original text preserved.
+    """
+    raw = _envelope(ok=False, output=None, error={"type": "transport", "message": "spoofed"})
+    result = CallResult.decode(raw, capability="x")
+    assert result.error is not None
+    assert result.error.type == "internal"
+    assert "transport" in result.error.message
+    assert "spoofed" in result.error.message, "the agent's own text must survive"

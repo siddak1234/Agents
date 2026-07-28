@@ -248,6 +248,11 @@ whose fields you should be echoing back.
 These are not style preferences. Each one is a real defect that the review
 board blocks on.
 
+(Maintainers: this list deliberately restates `AGENT_PROTOCOL.md` §"Rules an
+agent must follow" so the page stays self-contained for a chat with no repo
+access — rules 1–4 share its numbering, 5 is its environment rule, 6 is its
+"import lazily". Editing either file means editing both.)
+
 **1. stdout carries the envelope and nothing else.** One stray `print()`, or
 one log line from a library, makes the response unparseable. Point
 `sys.stdout` at stderr before doing any work, and write the envelope to the
@@ -349,9 +354,13 @@ prove nothing. `agents check` exists precisely to catch them disagreeing.
 
 ### The skeleton
 
-This is `agent_main.py` as the template ships it. Start from this — it already
-satisfies rules 1, 2 and 3. Replace `greet` with your capability, and move
-anything that is real work into a separate module.
+This is the template's `agent_main.py`, lightly adapted for this page — the
+name is a placeholder and the `RULE n` comments are numbered to match the
+list above, so this copy and that list cannot disagree. Start from this — it
+already satisfies rules 1, 2 and 3. Replace `greet` with your capability, and
+move anything that is real work into a separate module. (If you cloned the
+repo, `uv run agents new my-agent` gives you the same skeleton with the
+renames already done.)
 
 ```python
 #!/usr/bin/env python3

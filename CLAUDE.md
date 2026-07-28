@@ -76,11 +76,12 @@ folder — there is no root-level runner for agent code.
 ## Verifying a change
 
 ```bash
-uv run agents check      # every agent still answers, and matches its manifest
-uv run pytest            # contract and template
-uv run ruff check orchestrator tests _template
-uv run mypy orchestrator
+uv run agents verify
 ```
+
+One command, running every gate CI runs — including the format check that
+the previous hand-listed version of this block forgot, which is exactly why
+the gates are enumerated in one place (`agents verify`) and nowhere else.
 
 `agents describe <agent>` against `agents describe <agent> --static` shows
 whether a manifest has drifted from its code — the first runs the agent, the

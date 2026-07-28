@@ -113,21 +113,16 @@ ran it alone. Depend on the orchestrator for nothing.
 
 ## Non-negotiable rules
 
-These are enforced by tests and reviewed on every PR.
+The rules live in one place: [`AGENT_PROTOCOL.md` §"Rules an agent must
+follow"](./AGENT_PROTOCOL.md#rules-an-agent-must-follow), plus the
+environment rule in its `agent.yaml` section. This file used to carry its own
+copy with its own numbering; the two drifted, and "rule 5" meant different
+things depending on which file you had open. Cite the protocol's numbers.
 
-1. **stdout carries the envelope and nothing else.** Logs go to stderr. Point
-   `sys.stdout` at stderr before doing any work — this is usually broken by a
-   dependency printing, not by your own code.
-2. **Exit 0 whenever an envelope was produced**, including failures. A
-   business failure is a successful call that returned a failure.
-3. **Validate your own input.** The schemas in `agent.yaml` are documentation;
-   the orchestrator does not enforce them.
-4. **A missing credential returns `unavailable`, never a crash.**
-5. **Declare the environment you need — nothing more.** You receive only what
-   `runtime.env.inherit` names. Do not ask for a variable a capability does
-   not use.
-6. **`describe` must not import heavy dependencies.** It has to answer on a
-   machine that cannot run the rest of you.
+What enforces them: the transport tests pin the stdout rule, the exit-0 rule
+and the deny-by-default environment. The rest — input validation, graceful
+`unavailable`, a light `describe` — are exactly what the review board reads
+your diff for, which is why a reviewer's finding on them is blocking.
 
 ## Opening the PR
 
@@ -146,9 +141,13 @@ findings with the file and the fix.
 `/raise-pr` runs in your own Claude Code session, on your own subscription —
 there is nothing to configure and no key involved.
 
-The same four reviewers run again in CI on the pull request, and *that* run is
-what branch protection enforces. `/raise-pr` is the fast path — a minute
-instead of a push-and-wait — not the gate.
+The same four reviewers run again in CI on the pull request. That run becomes
+the gate only once the repository owner configures two things: a
+`CLAUDE_CODE_OAUTH_TOKEN` secret so the board can authenticate, and branch
+protection requiring the **review board** check. Until then it is advisory —
+and on a fork pull request it cannot run at all, because GitHub withholds
+secrets from forks; a human reads those diffs. `/raise-pr` is the fast path —
+a minute instead of a push-and-wait — not the gate.
 
 CI builds and describes **your agent only**, so a red build is about your work
 and nobody else's. The exception is a change under `orchestrator/`: shared
