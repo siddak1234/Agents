@@ -145,7 +145,7 @@ def load(agent_dir: Path) -> AgentManifest:
         test=test,
         lint=lint,
         # Always the manifest's own directory. Not configurable: this is what
-        # makes an agent's relative paths (.env, alembic.ini) resolve, and a
+        # makes an agent's relative paths (.env, pyproject.toml) resolve, and a
         # configurable cwd is a configurable way to get that silently wrong.
         workdir=agent_dir.resolve(),
         capabilities=capabilities,

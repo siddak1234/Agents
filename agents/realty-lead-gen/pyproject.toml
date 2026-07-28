@@ -116,7 +116,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "unit: fast unit tests, no I/O",
-    "golden: LLM prompt golden-file tests (skipped by default; needs ANTHROPIC_API_KEY)",
 ]
 filterwarnings = [
     "error",

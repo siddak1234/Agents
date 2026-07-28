@@ -3,43 +3,41 @@
 #
 # Every hook is scoped to this folder. pre-commit always operates from the
 # git root regardless of where it is invoked, so without `files:` these hooks
-# would receive root-owned code too — and `ruff --fix` under this folder's
-# older ruff pin would happily rewrite it.
+# would receive root-owned code too. That prefix is load-bearing and easy to
+# break: moving this folder under agents/ left it reading `^realty-lead-gen/`,
+# and all twelve hooks silently reported "no files to check" until it was
+# fixed. If this folder is ever extracted to its own repository, drop `files:`
+# entirely — the folder becomes the git root.
+#
+# No ruff here on purpose: `make lint` and the manifest's `runtime.lint` both
+# run ruff from this agent's own venv, so a second pinned copy could only
+# disagree with the gate CI actually enforces.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: check-yaml
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: check-toml
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: check-json
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: check-added-large-files
         args: ["--maxkb=512"]
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: end-of-file-fixer
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: trailing-whitespace
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: mixed-line-ending
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: check-merge-conflict
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
       - id: detect-private-key
-        files: ^realty-lead-gen/
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
-    hooks:
-      - id: ruff
-        args: [--fix]
-        files: ^realty-lead-gen/
-      - id: ruff-format
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:
       - id: gitleaks
-        files: ^realty-lead-gen/
+        files: ^agents/realty-lead-gen/
