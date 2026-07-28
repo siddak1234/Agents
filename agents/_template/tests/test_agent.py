@@ -37,7 +37,7 @@ def call(capability: str, payload: dict | None = None) -> dict:
         timeout=30,
         check=False,
     )
-    # Exit 0 even for failures: an envelope was produced. See AGENT_PROTOCOL.md.
+    # Exit 0 even for failures: an envelope was produced. See docs/AGENT_PROTOCOL.md.
     assert proc.returncode == 0, f"agent exited {proc.returncode}\n{proc.stderr}"
     # stdout must be exactly one JSON object — a stray print would break this.
     return json.loads(proc.stdout)

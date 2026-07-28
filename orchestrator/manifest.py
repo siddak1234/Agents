@@ -206,7 +206,7 @@ def _inherit_problem(pattern: str) -> str | None:
     this agent*: `AWS*` is three characters and legal here, and it reaches
     `AWS_SECRET_ACCESS_KEY`. So are `DB_*`, `API*` and `JWT*`. Whether a
     capability genuinely needs the family it names is a review question —
-    CONTRIBUTING.md lists `runtime.env.inherit` broader than the capabilities
+    docs/CONTRIBUTING.md lists `runtime.env.inherit` broader than the capabilities
     justify as a blocking finding — and no character count decides it.
     """
     if any(char in pattern for char in "?[]"):

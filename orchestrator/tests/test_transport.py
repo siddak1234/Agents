@@ -460,7 +460,7 @@ def test_envelope_survives_a_round_trip():
 
 @pytest.mark.parametrize("bad", [_OMIT, None, 7, "none", []])
 def test_usage_is_mandatory_not_merely_documented(bad):
-    """AGENT_PROTOCOL.md says usage is always present. Now it is enforced.
+    """docs/AGENT_PROTOCOL.md says usage is always present. Now it is enforced.
 
     A missing or non-object `usage` silently decoded as zeros, so an agent could
     omit accounting entirely and its envelope still read as valid. Zeros an
@@ -501,7 +501,7 @@ def test_usage_may_report_zeros_when_nothing_was_spent():
 def test_an_agent_cannot_emit_a_transport_error():
     """`transport` is the orchestrator's word, and only the orchestrator's.
 
-    AGENT_PROTOCOL.md says agents never emit it, but because it sat in
+    docs/AGENT_PROTOCOL.md says agents never emit it, but because it sat in
     ERROR_TYPES an agent could — and its envelope was indistinguishable from
     an orchestrator-side failure, which is the one distinction the taxonomy
     exists to hold. An agent-emitted `transport` now demotes to `internal`

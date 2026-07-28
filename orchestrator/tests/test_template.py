@@ -20,10 +20,10 @@ import pytest
 
 from orchestrator import manifest as manifest_mod
 from orchestrator.contract import PROTOCOL, CallRequest
-from orchestrator.discovery import load_registry, repo_root
+from orchestrator.discovery import TEMPLATE_DIR, load_registry, repo_root
 from orchestrator.runner import call, describe
 
-TEMPLATE = repo_root() / "_template"
+TEMPLATE = repo_root() / TEMPLATE_DIR
 
 
 @pytest.fixture(scope="module")

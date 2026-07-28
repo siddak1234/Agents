@@ -19,19 +19,19 @@ from pathlib import Path
 import pytest
 
 from orchestrator.cli import main
-from orchestrator.discovery import integration_problems, load_registry
+from orchestrator.discovery import TEMPLATE_DIR, integration_problems, load_registry
 from orchestrator.runner import describe
 from orchestrator.scaffold import ScaffoldError, create_agent
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """A miniature repository: the real template, an empty registry, a README."""
     shutil.copytree(
-        REPO / "_template",
-        tmp_path / "_template",
+        REPO / TEMPLATE_DIR,
+        tmp_path / TEMPLATE_DIR,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     (tmp_path / "registry.yaml").write_text("version: 2\n\nagents:\n", encoding="utf-8")
@@ -49,7 +49,10 @@ def test_it_creates_a_registered_loadable_agent(repo: Path) -> None:
     assert "weather-agent" in registry.agents
     # The name lives in two files and discovery rejects them disagreeing.
     assert registry.get("weather-agent").name == "weather-agent"
-    assert 'AGENT_NAME = "weather-agent"' in (repo / "weather-agent" / "agent_main.py").read_text()
+    assert (
+        'AGENT_NAME = "weather-agent"'
+        in (repo / "agents" / "weather-agent" / "agent_main.py").read_text()
+    )
 
 
 def test_the_new_agent_answers_immediately(repo: Path) -> None:
@@ -103,6 +106,7 @@ def test_unusable_names_are_refused(repo: Path, name: str) -> None:
     with pytest.raises(ScaffoldError):
         create_agent(repo, name)
     assert not (repo / name).exists(), "a refused name must leave nothing behind"
+    assert not (repo / "agents" / name).exists()
 
 
 def test_it_refuses_to_overwrite(repo: Path) -> None:
@@ -134,7 +138,7 @@ def test_registry_comments_survive(repo: Path) -> None:
 def test_cli_reports_each_step(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--root", str(repo), "new", "weather-agent"]) == 0
     out = capsys.readouterr().out
-    assert "created weather-agent/" in out
+    assert "created agents/weather-agent/" in out
     assert "registered weather-agent" in out
     # It must say what is deliberately left undone, or the omission reads as a bug.
     assert "LICENSE" in out
@@ -188,7 +192,7 @@ def test_scaffold_refuses_a_registry_without_an_agents_key(repo: Path) -> None:
     (repo / "registry.yaml").write_text("# no agents key\nversion: 2\n", encoding="utf-8")
     with pytest.raises(ScaffoldError, match="no top-level `agents:` key"):
         create_agent(repo, "weather-agent")
-    assert not (repo / "weather-agent").exists(), "must refuse before touching anything"
+    assert not (repo / "agents" / "weather-agent").exists(), "must refuse before touching anything"
     assert "weather-agent" not in (repo / "registry.yaml").read_text(encoding="utf-8")
 
 

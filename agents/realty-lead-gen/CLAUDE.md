@@ -8,7 +8,7 @@ tenacity, structlog, the Anthropic SDK. Dependencies managed with `uv`.
 The lead-generation *service* this grew out of — FastAPI, Postgres,
 migrations, source adapters, jobs — lives in the `realty-lead-gen-service`
 repository. Do not add service machinery back here: the repository's shape
-rule (CONTRIBUTING.md, "How big is an agent?") blocks it, and this folder is
+rule (docs/CONTRIBUTING.md, "How big is an agent?") blocks it, and this folder is
 the worked example of that rule.
 
 ## Commands
@@ -38,7 +38,7 @@ make hooks   # this folder's pre-commit hooks, run on demand
 ## The agentcall entrypoint
 
 `src/realty_lead_gen/agentcall.py` implements `agentcall/v1` (see
-`AGENT_PROTOCOL.md` at the repository root) and is what
+`docs/AGENT_PROTOCOL.md` at the repository root) and is what
 `uv run agents call realty-lead-gen ...` invokes. It is an **adapter**: it
 translates the wire protocol into calls on `realty_lead_gen.agents` and
 back. No business logic belongs there.

@@ -140,10 +140,12 @@ uv run agents new my-agent    # use your agent's real name, lowercase-with-hyphe
 git checkout -b my-agent
 ```
 
-That copies the template, sets the name in the two files that must agree,
-registers it, and adds it to the README table. It deliberately does **not**
-write your description, your capabilities, or a LICENSE — those are the
-decisions that make it an agent instead of a copy.
+That creates `agents/my-agent/` from the template, sets the name in the two
+files that must agree, registers it, and adds it to the README table. Agents
+live under `agents/` — tenant space; everything outside it is the platform.
+The command deliberately does **not** write your description, your
+capabilities, or a LICENSE — those are the decisions that make it an agent
+instead of a copy.
 
 ## Part 4 — Build it
 
@@ -268,7 +270,7 @@ board blocks on.
 
 (Maintainers: this list deliberately restates the contract so the page stays
 self-contained for a chat with no repo access. The mapping to
-`AGENT_PROTOCOL.md`: rules 1–4 here are §"Rules an agent must follow" 1–4;
+`docs/AGENT_PROTOCOL.md`: rules 1–4 here are §"Rules an agent must follow" 1–4;
 rule 5 here restates the deny-by-default environment rule from §"What the
 orchestrator guarantees"; rule 6 here is that section's rule 5, "Import
 lazily". The protocol's rule 6 — declare every capability in `agent.yaml` —
@@ -538,8 +540,8 @@ never callable, because discovery is by declaration and never by globbing.
 version: 2
 
 agents:
-  - path: realty-lead-gen
-  - path: my-agent
+  - path: agents/realty-lead-gen
+  - path: agents/my-agent
 ```
 
 Paths only. Everything else about your agent lives in your own `agent.yaml`.
@@ -551,8 +553,8 @@ The agents table in the root `README.md` — add the last row:
 
 | Agent | Status | Capabilities |
 |---|---|---|
-| [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
-| [`my-agent`](./my-agent) | active | `your_capability` |
+| [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
+| [`my-agent`](./agents/my-agent) | active | `your_capability` |
 ```
 
 `active` is the status to use. List your real capabilities, not `describe` —

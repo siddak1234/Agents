@@ -35,10 +35,10 @@ repos:
     rev: v0.14.0
     hooks:
       - id: ruff-format
-        files: ^(orchestrator|tests|_template)/
+        files: ^(orchestrator|agents/_template)/
       - id: ruff
         args: [--fix]
-        files: ^(orchestrator|tests|_template)/
+        files: ^(orchestrator|agents/_template)/
 
   - repo: local
     hooks:

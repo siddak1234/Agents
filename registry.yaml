@@ -8,9 +8,11 @@
 # repository is not enough to make it callable. It has to be listed here and
 # it has to contain an `agent.yaml`, or `agents check` fails.
 #
-# The declared folder name must equal the `name` in its agent.yaml.
+# Agents live under `agents/` — tenant space, visually separate from the
+# platform. The declared folder name must equal the `name` in its
+# agent.yaml.
 
 version: 2
 
 agents:
-  - path: realty-lead-gen
+  - path: agents/realty-lead-gen

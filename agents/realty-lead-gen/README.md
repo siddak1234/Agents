@@ -2,7 +2,7 @@
 
 Grades property condition from listing photos on the Fannie Mae UAD scale
 (C1–C6) and estimates a rehab range, in one Claude vision call. Called over
-`agentcall/v1`; see `AGENT_PROTOCOL.md` at the repository root.
+`agentcall/v1`; see `docs/AGENT_PROTOCOL.md` at the repository root.
 
 This folder used to hold an entire lead-generation service — FastAPI,
 Postgres, migrations, source adapters, background jobs. That service now

@@ -1,5 +1,5 @@
 # How the repository orchestrator calls this agent.
-# Contract: AGENT_PROTOCOL.md at the repository root.
+# Contract: docs/AGENT_PROTOCOL.md at the repository root.
 #
 # This file belongs to the agent, not to the orchestrator. Nothing here
 # depends on the orchestrator existing — the folder still works copied out

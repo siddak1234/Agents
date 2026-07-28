@@ -4,29 +4,31 @@ A repository of independent agents and one orchestrator that calls them.
 
 An agent here is something you **call**, not something you boot: one JSON
 request in, one structured result out, with cost attached. The contract is
-[`AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md) and it is the only thing the
+[`docs/AGENT_PROTOCOL.md`](./docs/AGENT_PROTOCOL.md) and it is the only thing the
 orchestrator knows about any agent.
 
 ## Layout
 
+Three folders, and building an agent needs only two of them:
+
 ```
-.
-├── AGENT_PROTOCOL.md   the contract — read this first
-├── CONTRIBUTING.md     how to add your own agent
-├── _template/          a working agent to copy. Start here.
-├── orchestrator/       discovery, manifests, transport, CLI
-├── tests/              contract and template tests
-├── .claude/            skills, rules, hooks, reviewers, /raise-pr
-├── docs/               roadmap and deeper notes
-├── registry.yaml       which agents exist (paths only)
-└── <agent-name>/       one folder per agent, each with its own agent.yaml
+agents/              every agent, one folder each — yours goes here
+  _template/           a working agent to copy. Start here.
+  realty-lead-gen/     a worked reference
+docs/                the contract, how to contribute, the intern brief
+orchestrator/        the platform that calls agents, and its own tests
 ```
+
+Plus `registry.yaml` (which agents exist — paths only) and `.claude/`
+(editor guidance). Everything else at the root is there because a tool
+insists on finding it there: `pyproject.toml`, `uv.lock`,
+`.pre-commit-config.yaml`, `.gitignore`.
 
 ## Agents
 
 | Agent | Status | Capabilities |
 |---|---|---|
-| [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
+| [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
 
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered
@@ -56,7 +58,7 @@ credentials it never declared.
 ## Adding an agent
 
 `uv run agents new my-agent`, then follow
-[`CONTRIBUTING.md`](./CONTRIBUTING.md). Building from claude.ai chat instead
+[`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md). Building from claude.ai chat instead
 of Claude Code? [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the
 self-contained version — paste it into a chat and it carries the whole
 contract with it. Two examples exist on purpose: `_template/` is the

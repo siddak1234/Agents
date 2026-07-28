@@ -4,7 +4,7 @@ This repo holds many independent agents and one orchestrator that calls them.
 Your agent can do anything. It must be callable the same way everything else
 here is.
 
-Read [`AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md) first — it is the contract,
+Read [`docs/AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md) first — it is the contract,
 and it is short.
 
 ## The mental model
@@ -19,7 +19,7 @@ Two examples, deliberately at opposite ends:
 | | What it shows |
 |---|---|
 | [`_template/`](./_template) | The skeleton. ~100 lines, standard library, runs with no install. **Start here.** |
-| [`realty-lead-gen/`](./realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
+| [`realty-lead-gen/`](./agents/realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
 
 Copy the template. Read the reference when you need to see how something is
 done at scale.
@@ -84,7 +84,7 @@ rather than a copy, and `--strict` reporting them is the integration.
 2. **Implement.** Replace the example capability. Keep `describe`.
 3. **Declare.** Every capability in `agent.yaml`, with input and output
    schemas, plus any environment variables under `runtime.env.inherit`.
-4. **Register.** Add `- path: my-agent` to `registry.yaml` and a row to the
+4. **Register.** Add `- path: agents/my-agent` to `registry.yaml` and a row to the
    README table.
 5. **Verify.**
 
@@ -137,7 +137,7 @@ ran it alone. Depend on the orchestrator for nothing.
 
 ## Non-negotiable rules
 
-The rules live in one place: [`AGENT_PROTOCOL.md` §"Rules an agent must
+The rules live in one place: [`docs/AGENT_PROTOCOL.md` §"Rules an agent must
 follow"](./AGENT_PROTOCOL.md#rules-an-agent-must-follow), plus the
 environment rule in its `agent.yaml` section. This file used to carry its own
 copy with its own numbering; the two drifted, and "rule 5" meant different

@@ -335,8 +335,8 @@ def _run_declared(selected: list[AgentManifest], field: str) -> int:
 #: pass" while carrying a committed credential that CI would reject.
 _TOOL_STEPS = (
     ("secret scan", ("pre_commit", "run", "gitleaks", "--all-files")),
-    ("ruff format", ("ruff", "format", "--check", "orchestrator", "tests", "_template")),
-    ("ruff check", ("ruff", "check", "orchestrator", "tests", "_template")),
+    ("ruff format", ("ruff", "format", "--check", "orchestrator", "agents/_template")),
+    ("ruff check", ("ruff", "check", "orchestrator", "agents/_template")),
     ("mypy", ("mypy", "orchestrator")),
     ("pytest", ("pytest", "-q")),
 )

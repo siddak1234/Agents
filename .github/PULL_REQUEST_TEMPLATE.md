@@ -27,7 +27,7 @@ Delete the section that does not apply.
 ### Changing the orchestrator or the contract
 
 - [ ] A test fails without this change
-- [ ] `AGENT_PROTOCOL.md` updated if the wire format or guarantees moved
+- [ ] `docs/AGENT_PROTOCOL.md` updated if the wire format or guarantees moved
 - [ ] No agent-specific behaviour added to shared code
 - [ ] Existing agents still pass `agents check`
 

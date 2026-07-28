@@ -20,6 +20,7 @@ import yaml
 
 from orchestrator.cli import main
 from orchestrator.discovery import (
+    TEMPLATE_DIR,
     TODO_MARKER,
     _has_readme_row,
     integration_problems,
@@ -30,7 +31,7 @@ from orchestrator.discovery import (
 #: hardcoded a copy of agent.yaml, which drifted the moment the template
 #: gained `runtime.test` and `runtime.lint` — leaving the flagship test
 #: asserting two problems a genuinely renamed template can no longer produce.
-TEMPLATE_SRC = Path(__file__).resolve().parent.parent / "_template"
+TEMPLATE_SRC = Path(__file__).resolve().parents[2] / TEMPLATE_DIR
 
 #: Read from the template so an edit there cannot silently invalidate the
 #: description-similarity tests below.
@@ -41,7 +42,7 @@ def _repo(tmp_path: Path) -> Path:
     """A repository holding the real template and nothing else."""
     shutil.copytree(
         TEMPLATE_SRC,
-        tmp_path / "_template",
+        tmp_path / TEMPLATE_DIR,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     (tmp_path / "README.md").write_text("# Agents\n\n| Agent | Status |\n", encoding="utf-8")
@@ -56,8 +57,9 @@ def _copy_template_as(root: Path, name: str) -> Path:
     nothing else. This is the minimum that makes discovery load the agent, and
     the point of these tests is that the minimum is not integration.
     """
-    agent = root / name
-    shutil.copytree(root / "_template", agent)
+    agent = root / "agents" / name
+    agent.parent.mkdir(exist_ok=True)
+    shutil.copytree(root / TEMPLATE_DIR, agent)
     manifest = agent / "agent.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace("name: _template", f"name: {name}", 1),
@@ -71,7 +73,7 @@ def _copy_template_as(root: Path, name: str) -> Path:
         encoding="utf-8",
     )
     (root / "registry.yaml").write_text(
-        f"version: 2\nagents:\n  - path: {name}\n", encoding="utf-8"
+        f"version: 2\nagents:\n  - path: agents/{name}\n", encoding="utf-8"
     )
     return agent
 
@@ -83,6 +85,47 @@ def _clear_markers(agent: Path) -> None:
             text = path.read_text(encoding="utf-8")
             if TODO_MARKER in text:
                 path.write_text(text.replace(TODO_MARKER, "done"), encoding="utf-8")
+
+
+def test_a_registered_agent_outside_agents_dir_is_told_to_move(tmp_path: Path) -> None:
+    """The layout rule: agents live in agents/<name>, and the gate says so.
+
+    A registered path anywhere else still loads — discovery is by
+    declaration — but it puts tenant code in platform space, and the next
+    contributor copies whatever the last one did.
+    """
+    root = _repo(tmp_path)
+    agent = root / "weather-agent"
+    shutil.copytree(root / TEMPLATE_DIR, agent)
+    manifest = agent / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("name: _template", "name: weather-agent", 1),
+        encoding="utf-8",
+    )
+    (root / "registry.yaml").write_text(
+        "version: 2\nagents:\n  - path: weather-agent\n", encoding="utf-8"
+    )
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "outside agents/" in problems
+    assert "agents/<name>" in problems
+
+
+def test_a_stray_agent_folder_at_the_root_is_reported(tmp_path: Path) -> None:
+    """An unregistered agent.yaml at the root is caught, not just in agents/.
+
+    That is where an old habit or a copied tutorial puts one, and discovery
+    ignoring it by design is exactly why the gate must not.
+    """
+    root = _repo(tmp_path)
+    _copy_template_as(root, "weather-agent")  # a properly-placed agent too
+    stray = root / "parcel-geo"
+    stray.mkdir()
+    shutil.copy(root / TEMPLATE_DIR / "agent.yaml", stray / "agent.yaml")
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "parcel-geo/ holds an agent.yaml but is not in registry.yaml" in problems
+    assert "path: agents/parcel-geo" in problems, "the fix must name the right location"
 
 
 def test_a_renamed_template_is_not_an_integrated_agent(tmp_path: Path) -> None:
@@ -356,7 +399,7 @@ def test_a_missing_template_is_reported_rather_than_skipping_checks(tmp_path: Pa
     _finished(root)
     assert integration_problems(load_registry(root)) == []
 
-    (root / "_template" / "agent.yaml").unlink()
+    (root / TEMPLATE_DIR / "agent.yaml").unlink()
     problems = "\n".join(integration_problems(load_registry(root)))
     assert "_template/ is missing or unreadable" in problems
 

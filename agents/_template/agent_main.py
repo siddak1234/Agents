@@ -10,7 +10,7 @@ Try it without the orchestrator at all:
     echo '{"protocol":"agentcall/v1","capability":"describe","input":{}}' \\
       | python3 agent_main.py
 
-The contract lives in AGENT_PROTOCOL.md at the repository root. The four
+The contract lives in docs/AGENT_PROTOCOL.md at the repository root. The four
 rules that matter are marked RULE below.
 """
 

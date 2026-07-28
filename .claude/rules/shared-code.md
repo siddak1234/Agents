@@ -1,9 +1,8 @@
 ---
 paths:
   - "orchestrator/**"
-  - "tests/**"
   - "registry.yaml"
-  - "AGENT_PROTOCOL.md"
+  - "docs/AGENT_PROTOCOL.md"
 ---
 
 # Editing shared code
@@ -25,11 +24,11 @@ agents to design against. With one, you are guessing — say so instead.
 **A change needs a test that fails without it.** These files have no product
 behaviour of their own; the tests are the specification.
 
-**Root tooling covers root-owned code only** — `orchestrator`, `tests`,
-`_template`. Agents lint and type-check themselves with their own
-configuration. Commands pass explicit paths, never `.`.
+**Root tooling covers platform code only** — `orchestrator` (tests included)
+and `agents/_template`. Real agents lint and type-check themselves with their
+own configuration. Commands pass explicit paths, never `.`.
 
-**Changing `AGENT_PROTOCOL.md` changes a contract other people implement.**
+**Changing `docs/AGENT_PROTOCOL.md` changes a contract other people implement.**
 Say what existing agents must do, and whether they must do it now.
 
 Verify with:

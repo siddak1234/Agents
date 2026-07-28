@@ -3,7 +3,7 @@
 This module is the single definition of what crosses the process boundary.
 It deliberately depends on nothing but the standard library: the contract
 outlives whatever transport carries it, so it must not acquire a transport's
-dependencies. See AGENT_PROTOCOL.md for the prose.
+dependencies. See docs/AGENT_PROTOCOL.md for the prose.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ PROTOCOL: Final = "agentcall/v1"
 #: The one capability every agent implements. Handshake, not business logic.
 DESCRIBE: Final = "describe"
 
-#: See AGENT_PROTOCOL.md. `transport` is orchestrator-side only.
+#: See docs/AGENT_PROTOCOL.md. `transport` is orchestrator-side only.
 ERROR_TYPES: Final = frozenset(
     {"invalid_request", "unavailable", "timeout", "internal", "transport"}
 )
@@ -57,7 +57,7 @@ class Usage:
     def from_wire(cls, raw: Any) -> Usage:
         """Decode `usage`, requiring it to be present.
 
-        AGENT_PROTOCOL.md says usage is always present, zeroed when nothing was
+        docs/AGENT_PROTOCOL.md says usage is always present, zeroed when nothing was
         spent — but this silently returned zeros for a missing or non-object
         `usage`, so "always present" was prose and nothing else. An agent could
         omit it entirely and its envelope still decoded as valid.
@@ -106,7 +106,7 @@ class CallError:
             # An agent inventing its own taxonomy is a bug in the agent, but
             # losing the message would make it unfixable. Keep the text.
             #
-            # `transport` gets the same treatment: AGENT_PROTOCOL.md says
+            # `transport` gets the same treatment: docs/AGENT_PROTOCOL.md says
             # agents never emit it, yet because it sat in ERROR_TYPES an agent
             # could — and its envelope would be indistinguishable from an
             # orchestrator-side failure, which is the one distinction the

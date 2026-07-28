@@ -1,7 +1,7 @@
 """agentcall/v1 adapter — how the repository orchestrator calls this agent.
 
 Read one JSON request from stdin, write one JSON envelope to stdout. See
-`AGENT_PROTOCOL.md` at the repository root for the contract.
+`docs/AGENT_PROTOCOL.md` at the repository root for the contract.
 
 This module is an adapter and nothing more. It owns no business logic: it
 translates the wire protocol into calls on the agents that already live in

@@ -55,9 +55,9 @@ jobs:
       # Root-owned code only. Agent folders lint themselves with their own
       # config, in their own workflow.
       - name: Ruff format check
-        run: uv run ruff format --check orchestrator tests _template
+        run: uv run ruff format --check orchestrator agents/_template
       - name: Ruff lint
-        run: uv run ruff check orchestrator tests _template
+        run: uv run ruff check orchestrator agents/_template
       - name: Mypy (strict)
         run: uv run mypy orchestrator
 
@@ -129,12 +129,13 @@ jobs:
           fi
 
           # Otherwise: only agents whose own folder changed, and only those
-          # actually in the registry. An unregistered folder is not an agent,
-          # so `_template` never reaches this list.
+          # actually in the registry. Agents live under agents/<name>, so the
+          # name is the second path segment. An unregistered folder is not an
+          # agent, so `_template` never reaches this list.
           registered=$(uv run agents list --json |
             uv run python -c 'import json,sys; print(" ".join(a["name"] for a in json.load(sys.stdin)))')
           scoped=""
-          for dir in $(echo "$changed" | cut -d/ -f1 | sort -u); do
+          for dir in $(echo "$changed" | grep '^agents/' | cut -d/ -f2 | sort -u); do
             case " $registered " in *" $dir "*) scoped="$scoped $dir" ;; esac
           done
           scoped=$(echo "$scoped" | xargs || true)
@@ -162,9 +163,9 @@ jobs:
           # synced in its own folder, and one with no dependencies needs
           # nothing done to it.
           for a in $agents; do
-            if [ -f "$a/pyproject.toml" ]; then
-              echo "::group::uv sync $a"
-              (cd "$a" && uv sync --frozen)
+            if [ -f "agents/$a/pyproject.toml" ]; then
+              echo "::group::uv sync agents/$a"
+              (cd "agents/$a" && uv sync --frozen)
               echo "::endgroup::"
             fi
           done

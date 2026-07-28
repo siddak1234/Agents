@@ -33,7 +33,7 @@ cp -r _template my-agent
 ```
 
 Search the copy for `TODO(new agent)` — every spot needing a change is
-marked. [`CONTRIBUTING.md`](../CONTRIBUTING.md) has the full checklist and
+marked. [`docs/CONTRIBUTING.md`](../CONTRIBUTING.md) has the full checklist and
 the rules reviewers apply; `agent_main.py` marks the four contract rules
 inline as `RULE`, at the line where each is easy to break.
 

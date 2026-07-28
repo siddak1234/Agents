@@ -7,7 +7,7 @@ model: sonnet
 
 You review one question: **is this a well-formed agent?**
 
-Read `AGENT_PROTOCOL.md` and the changed agent's `agent.yaml` and entrypoint.
+Read `docs/AGENT_PROTOCOL.md` and the changed agent's `agent.yaml` and entrypoint.
 Get the change with `git diff origin/main...HEAD` (read-only git only — you
 review, you do not fix).
 
@@ -28,7 +28,7 @@ Input and output schemas present and honest. `describe` declared. No
 capability in code but missing from `agent.yaml`, or the reverse — that
 divergence is a defect, not an oversight.
 
-**Contract adherence**, from `AGENT_PROTOCOL.md`:
+**Contract adherence**, from `docs/AGENT_PROTOCOL.md`:
 - stdout carries the envelope and nothing else; `sys.stdout` repointed before
   any work
 - exit 0 whenever an envelope was produced, including failures

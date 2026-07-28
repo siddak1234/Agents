@@ -149,7 +149,7 @@ approximately everything; it cannot tell whether a well-formed prefix is too
 broad for *this* agent. `AWS*` is legal here and reaches
 `AWS_SECRET_ACCESS_KEY`; so do `DB_*`, `API*` and `JWT*`. Whether a capability
 needs the family it names is a review question, and no character count settles
-it — see CONTRIBUTING.md, where `runtime.env.inherit` broader than the
+it — see docs/CONTRIBUTING.md, where `runtime.env.inherit` broader than the
 capabilities justify is a blocking finding.
 
 **Output is bounded.** stdout goes to a temporary file, not a pipe, and is
