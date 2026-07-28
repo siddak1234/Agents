@@ -47,6 +47,16 @@ jobs:
       - name: Sync
         run: uv sync --frozen
 
+      # pre-commit builds a virtualenv per hook repo, and this config pins
+      # `python3.13`. gitleaks is a Go hook so it never needed one, which is
+      # why the secret scan worked here for weeks and the first python hook
+      # added below did not: virtualenv could not discover an interpreter by
+      # that spec. uv's own interpreter is not on PATH under that name.
+      - name: Python for pre-commit's hook environments
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       # Cheapest gate, so it runs first: did this branch change only what an
       # agent change may? A stray edit to shared code inside a new-agent pull
       # request is the thing review is least likely to catch, and finding out
