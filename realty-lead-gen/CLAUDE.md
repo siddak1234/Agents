@@ -19,7 +19,8 @@ was chosen.
 Run these from this folder, not the repository root.
 
 ```bash
-make setup            # uv sync + pre-commit hooks
+make setup            # uv sync (never `pre-commit install` — see the Makefile)
+make hooks            # this folder's pre-commit hooks, run on demand
 make test             # unit tests — fast, no docker
 make test-integration # needs docker (spins up postgres + redis)
 make test-cov         # full suite with coverage
@@ -44,8 +45,9 @@ These are easy to violate by accident and expensive to unwind:
   deal analyses, and scores are snapshot tables, not in-place updates. The
   audit trail is a design goal — "why did we see it this way at time T?"
   must stay answerable.
-- **`mypy` runs strict and Ruff has the bandit (`S`) rules on.** Both are
-  enforced by pre-commit; do not weaken a rule to make a commit pass.
+- **`mypy` runs strict and Ruff has the bandit (`S`) rules on.** Ruff runs
+  in this folder's hooks (`make hooks`) and both run in CI; do not weaken a
+  rule to make a commit pass.
 
 ## Adapters degrade, they do not fail
 

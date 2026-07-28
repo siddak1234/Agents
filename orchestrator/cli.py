@@ -337,7 +337,16 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
     through their first agent wants the whole list — often one root cause
     shows up as three of these — and a single block of output is something
     they can paste somewhere and ask about.
+
+    The one thing checked *before* any gate runs is the scope itself: a
+    misspelled agent name must be an error up front, not eight vacuous passes.
     """
+    try:
+        _verify_scope(registry, args)
+    except DiscoveryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     results: list[tuple[str, str, str]] = []
 
     for label, argv in _TOOL_STEPS:
@@ -421,10 +430,16 @@ def _verify_declared(registry: Registry, args: argparse.Namespace, field: str) -
 
 
 def _verify_scope(registry: Registry, args: argparse.Namespace) -> list[AgentManifest]:
-    """Named agents, or all of them. An unknown name is caught by `check`."""
+    """Named agents, or all of them. Raises `DiscoveryError` on an unknown name.
+
+    This used to drop unknown names silently, which made every agent-scoped
+    gate pass vacuously: `agents verify tpyo` printed "All 8 gates pass" and
+    exited 0 while verifying nothing. A scope that cannot be resolved is an
+    error, not an empty scope.
+    """
     if not args.agents:
         return list(registry)
-    return [registry.get(n) for n in args.agents if n in registry.agents]
+    return [registry.get(n) for n in args.agents]
 
 
 def _describe_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:

@@ -157,3 +157,50 @@ def test_verify_fails_on_a_freshly_scaffolded_agent(
     captured = capsys.readouterr()
     assert "FAIL  agents list --strict" in captured.out
     assert "gates failed" in captured.err
+
+
+def test_verify_refuses_an_unknown_agent_name(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A misspelled name must be an error, not eight vacuous passes.
+
+    `_verify_scope` used to drop unknown names silently, so
+    `agents verify tpyo` verified nothing, printed "All 8 gates pass" and
+    exited 0 — the exact wrong answer for the one command a contributor is
+    told to trust.
+    """
+    create_agent(repo, "weather-agent")
+    assert main(["--root", str(repo), "verify", "wether-agent"]) == 2
+    captured = capsys.readouterr()
+    assert "unknown agent 'wether-agent'" in captured.err
+    assert "weather-agent" in captured.err, "the error must list what is registered"
+    assert "gates pass" not in captured.out
+
+
+def test_scaffold_refuses_a_registry_without_an_agents_key(repo: Path) -> None:
+    """Appending to a registry with no `agents:` key used to corrupt it.
+
+    The entry landed at top level, the file then parsed as something other
+    than a mapping, every later command failed on it — and the scaffolder had
+    already reported "registered" as a success step. Now it refuses up front,
+    before creating anything.
+    """
+    (repo / "registry.yaml").write_text("# no agents key\nversion: 2\n", encoding="utf-8")
+    with pytest.raises(ScaffoldError, match="no top-level `agents:` key"):
+        create_agent(repo, "weather-agent")
+    assert not (repo / "weather-agent").exists(), "must refuse before touching anything"
+    assert "weather-agent" not in (repo / "registry.yaml").read_text(encoding="utf-8")
+
+
+def test_scaffold_never_writes_a_registry_it_cannot_reload(repo: Path) -> None:
+    """The textual append is parsed back before it is written.
+
+    `agents:` not being the last key is the case the plain append gets wrong:
+    the entry would land under the following key instead. The write must be
+    refused and the file left byte-for-byte as it was.
+    """
+    original = "version: 2\nagents: []\nextra: value\n"
+    (repo / "registry.yaml").write_text(original, encoding="utf-8")
+    with pytest.raises(ScaffoldError, match="would not land under `agents:`"):
+        create_agent(repo, "weather-agent")
+    assert (repo / "registry.yaml").read_text(encoding="utf-8") == original

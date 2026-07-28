@@ -192,6 +192,28 @@ def test_agent_sees_only_the_environment_it_declared(stub, monkeypatch):
     assert "PATH" in keys, "base variables must still be present or nothing can run"
 
 
+def test_the_handshake_receives_no_inherited_environment(stub, monkeypatch):
+    """`agents check` is documented "no credentials" — this makes it true.
+
+    `describe` used to run through the same environment as any capability
+    call, so the handshake received every variable the manifest inherits —
+    keys included, on every `agents check`, in every CI run. The handshake
+    proves the entrypoint resolves and the manifest matches the code; none of
+    that may depend on a credential.
+    """
+    monkeypatch.setenv("STUB_ALLOWED", "a-credential")
+
+    assert "STUB_ALLOWED" in build_env(stub)
+    assert "STUB_ALLOWED" not in build_env(stub, inherit=False)
+
+    # End to end: the subprocess itself must not see it either.
+    keys = set(call(stub, CallRequest(capability="environment"), inherit_env=False).output["keys"])
+    assert "STUB_ALLOWED" not in keys
+    assert "PATH" in keys
+
+    assert describe(stub).ok, "describe must still answer with the inherited env withheld"
+
+
 def _with_inherit(stub, entry: str):
     """Rewrite the stub's inherit list to a single entry and reload."""
     manifest = stub.workdir / "agent.yaml"

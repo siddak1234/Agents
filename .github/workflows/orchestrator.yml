@@ -43,6 +43,15 @@ jobs:
       - name: Sync
         run: uv sync --frozen
 
+      # Secret scanning, same pin as the pre-commit hook. It ran locally on
+      # every commit and in CI on none — which meant `--no-verify`, a
+      # contributor who never ran `pre-commit install`, and every fork pull
+      # request (the interns) were all unscanned, on a public repository.
+      # Runs here because this job runs on everything and needs no secrets,
+      # so forks get it too.
+      - name: Secret scan (gitleaks)
+        run: uv run pre-commit run gitleaks --all-files
+
       # Root-owned code only. Agent folders lint themselves with their own
       # config, in their own workflow.
       - name: Ruff format check

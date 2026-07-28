@@ -11,10 +11,12 @@ agent — so the first test is literally that copy-and-rename, and it must fail.
 
 from __future__ import annotations
 
+import shutil
 import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from orchestrator.cli import main
 from orchestrator.discovery import (
@@ -24,45 +26,63 @@ from orchestrator.discovery import (
     load_registry,
 )
 
-TEMPLATE_MANIFEST = """\
-protocol: agentcall/v1
-name: _template
-description: Template agent — copy this folder to start a new one.
-runtime:
-  type: subprocess
-  # TODO(new agent): point this at your own environment.
-  command: ["python3", "agent_main.py"]
-capabilities:
-  - name: describe
-    description: Report this agent's name and capabilities.
-  - name: greet
-    description: Return a greeting. Replace this with something useful.
-"""
+#: The real template, not a transcript of it. An earlier version of this file
+#: hardcoded a copy of agent.yaml, which drifted the moment the template
+#: gained `runtime.test` and `runtime.lint` — leaving the flagship test
+#: asserting two problems a genuinely renamed template can no longer produce.
+TEMPLATE_SRC = Path(__file__).resolve().parent.parent / "_template"
+
+#: Read from the template so an edit there cannot silently invalidate the
+#: description-similarity tests below.
+TEMPLATE_DESCRIPTION: str = yaml.safe_load((TEMPLATE_SRC / "agent.yaml").read_text())["description"]
 
 
 def _repo(tmp_path: Path) -> Path:
-    """A repository holding the template and nothing else."""
-    template = tmp_path / "_template"
-    template.mkdir()
-    (template / "agent.yaml").write_text(TEMPLATE_MANIFEST, encoding="utf-8")
-    (template / "README.md").write_text("# Template agent\n", encoding="utf-8")
+    """A repository holding the real template and nothing else."""
+    shutil.copytree(
+        TEMPLATE_SRC,
+        tmp_path / "_template",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     (tmp_path / "README.md").write_text("# Agents\n\n| Agent | Status |\n", encoding="utf-8")
     (tmp_path / "registry.yaml").write_text("version: 2\nagents: []\n", encoding="utf-8")
     return tmp_path
 
 
 def _copy_template_as(root: Path, name: str) -> Path:
-    """Exactly what CONTRIBUTING tells a contributor to do: copy and rename."""
+    """Exactly what CONTRIBUTING tells a contributor to do: copy and rename.
+
+    The whole folder, and the name changed in the two places that must agree —
+    nothing else. This is the minimum that makes discovery load the agent, and
+    the point of these tests is that the minimum is not integration.
+    """
     agent = root / name
-    agent.mkdir()
-    (agent / "agent.yaml").write_text(
-        TEMPLATE_MANIFEST.replace("name: _template", f"name: {name}"), encoding="utf-8"
+    shutil.copytree(root / "_template", agent)
+    manifest = agent / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("name: _template", f"name: {name}", 1),
+        encoding="utf-8",
     )
-    (agent / "README.md").write_text(f"# {name}\n", encoding="utf-8")
+    entry = agent / "agent_main.py"
+    entry.write_text(
+        entry.read_text(encoding="utf-8").replace(
+            'AGENT_NAME = "_template"', f'AGENT_NAME = "{name}"', 1
+        ),
+        encoding="utf-8",
+    )
     (root / "registry.yaml").write_text(
         f"version: 2\nagents:\n  - path: {name}\n", encoding="utf-8"
     )
     return agent
+
+
+def _clear_markers(agent: Path) -> None:
+    """Work through every TODO marker the template plants, wherever it is."""
+    for path in agent.rglob("*"):
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            if TODO_MARKER in text:
+                path.write_text(text.replace(TODO_MARKER, "done"), encoding="utf-8")
 
 
 def test_a_renamed_template_is_not_an_integrated_agent(tmp_path: Path) -> None:
@@ -73,12 +93,33 @@ def test_a_renamed_template_is_not_an_integrated_agent(tmp_path: Path) -> None:
     problems = "\n".join(integration_problems(load_registry(root)))
 
     assert "no LICENSE" in problems
-    assert "no runtime.test" in problems
-    assert "no runtime.lint" in problems
     assert "TODO(new agent)" in problems
     assert "description is still the template's" in problems
     assert "only the template's example capabilities" in problems
     assert "missing from the README.md agents table" in problems
+
+    # The template ships real starter declarations for both of these, so a
+    # renamed copy must NOT be told they are missing — that message is for
+    # agents that deleted them, covered separately below.
+    assert "no runtime.test" not in problems
+    assert "no runtime.lint" not in problems
+
+
+def test_deleting_test_or_lint_commands_is_reported(tmp_path: Path) -> None:
+    """The template declares both; an agent that drops either is told so."""
+    root = _repo(tmp_path)
+    agent = _copy_template_as(root, "weather-agent")
+    manifest = agent / "agent.yaml"
+    kept = [
+        line
+        for line in manifest.read_text(encoding="utf-8").splitlines(keepends=True)
+        if not line.strip().startswith(("test:", "lint:"))
+    ]
+    manifest.write_text("".join(kept), encoding="utf-8")
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "no runtime.test" in problems
+    assert "no runtime.lint" in problems
 
 
 def test_strict_exits_non_zero_and_says_why(tmp_path: Path, capsys) -> None:
@@ -125,11 +166,7 @@ def test_a_finished_integration_passes(tmp_path: Path) -> None:
     )
     # The template plants markers outside the manifest too, and the folder is
     # scanned whole — so finishing the integration means clearing all of them.
-    for path in agent.rglob("*"):
-        if path.is_file():
-            text = path.read_text(encoding="utf-8")
-            if TODO_MARKER in text:
-                path.write_text(text.replace(TODO_MARKER, "done"), encoding="utf-8")
+    _clear_markers(agent)
 
     assert integration_problems(load_registry(root)) == []
 
@@ -181,6 +218,7 @@ def _finished(root: Path, name: str = "weather-agent") -> Path:
             """),
         encoding="utf-8",
     )
+    _clear_markers(agent)
     (root / "README.md").write_text(f"# Agents\n\n| Agent |\n|---|\n| {name} |\n", encoding="utf-8")
     return agent
 
@@ -223,14 +261,14 @@ def test_a_lightly_edited_template_description_is_caught(tmp_path: Path) -> None
     root = _repo(tmp_path)
     agent = _finished(root)
     manifest = agent / "agent.yaml"
-    template_description = "Template agent — copy this folder to start a new one."
+    template_description = TEMPLATE_DESCRIPTION
 
     for edited in (
         template_description,
-        template_description.replace(".", "!"),
+        template_description.rstrip(".") + "!",
         template_description.upper(),
         "  " + template_description + "  ",
-        template_description.replace("a new one", "a new one now"),
+        template_description + " now",
     ):
         manifest.write_text(
             manifest.read_text(encoding="utf-8").replace(
@@ -254,9 +292,8 @@ def test_the_template_sentence_padded_with_filler_is_still_caught(tmp_path: Path
     root = _repo(tmp_path)
     agent = _finished(root)
     manifest = agent / "agent.yaml"
-    template_sentence = "Template agent — copy this folder to start a new one."
     padded = (
-        f"{template_sentence} This agent processes real estate leads and grades "
+        f"{TEMPLATE_DESCRIPTION} This agent processes real estate leads and grades "
         f"photos for condition, and does a great deal of other useful work."
     )
     manifest.write_text(
