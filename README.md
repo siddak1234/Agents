@@ -60,8 +60,8 @@ credentials it never declared.
 of Claude Code? [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the
 self-contained version — paste it into a chat and it carries the whole
 contract with it. Two examples exist on purpose: `_template/` is the
-skeleton, `realty-lead-gen/` is a worked reference with real dependencies, a
-database, and its own CI.
+skeleton, `realty-lead-gen/` is a worked reference that calls a model —
+structured output, graceful degradation, its own locked dependencies.
 
 ## Development
 
@@ -89,7 +89,6 @@ is scoped with a `paths:` filter.
 | Workflow | Runs on | Gate |
 |---|---|---|
 | `orchestrator.yml` | every change | secret scan, ruff, strict mypy, registry validation, contract and template tests; then, per agent in scope: `agents check`, `agents lint`, `agents test` |
-| `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy, unit tests, integration against real Postgres and Redis, coverage gate |
 | `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Authenticates with `CLAUDE_CODE_OAUTH_TOKEN` (your Claude subscription, via `claude setup-token`) or `ANTHROPIC_API_KEY`; warns and skips with neither. Advisory until it is required in branch protection — and fork pull requests never receive secrets, so on a fork the board cannot run at all and a human reads the diff |
 
 `agents check` calls `describe` on an agent — no network, no cost, and the

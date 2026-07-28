@@ -2,26 +2,23 @@
 # Contract: AGENT_PROTOCOL.md at the repository root.
 #
 # This file belongs to the agent, not to the orchestrator. Nothing here
-# depends on the orchestrator existing — deleting it leaves the service and
-# its Makefile untouched.
+# depends on the orchestrator existing — the folder still works copied out
+# of this repository.
 
 protocol: agentcall/v1
 name: realty-lead-gen
 description: >-
-  Real-estate lead generation — grades property condition from photos,
-  values and comps a parcel, and scores it per persona.
+  Grades property condition from listing photos on the Fannie Mae UAD scale
+  and estimates a rehab range, using Claude vision. The full lead-generation
+  service this grew out of lives in its own repository.
 
 runtime:
   type: subprocess
   # Run through `uv` so the agent uses its own locked environment. The
   # working directory is always this file's folder, which is what makes
-  # `.env` and `alembic.ini` resolve; the orchestrator sets it and it is not
-  # configurable here.
+  # `.env` resolve; the orchestrator sets it and it is not configurable here.
   command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
 
-  # Unit tests only: the integration suite needs Postgres and Redis, and
-  # this command has to be runnable by anyone, anywhere, with no services.
-  #
   # `--extra dev` is what carries pytest. The command must stand up on a
   # machine that has only ever run `uv sync --frozen` here, because that is
   # what CI does before calling it — leave it off and the orchestrator reports
@@ -37,16 +34,14 @@ runtime:
   # variables every process needs (PATH, HOME, ...). Everything else in the
   # orchestrator's environment is withheld.
   #
-  # Note what is deliberately NOT here. This service holds database and Redis
-  # credentials, MLS and portal API tokens, a skip-tracing key and a JWT
-  # secret — and none of its agentcall capabilities need any of them. Photo
-  # grading needs Claude and nothing more. Widen this list only when a
-  # capability genuinely cannot work without a variable.
+  # Photo grading needs Claude and nothing more. When this folder still held
+  # the whole service the list was longer; the split is what made it this
+  # short, and the review board blocks widening it past what a capability
+  # actually reads.
   env:
     inherit:
       - ANTHROPIC_API_KEY
-      - ANTHROPIC_MODEL_* # reasoning / vision / cheap model selection
-      - LLM_MAX_COST_PER_LEAD_USD # per-lead cost circuit breaker
+      - ANTHROPIC_MODEL_* # vision model selection
       - APP_LOG_LEVEL
       - APP_LOG_FORMAT
 

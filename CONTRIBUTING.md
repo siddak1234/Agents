@@ -19,7 +19,7 @@ Two examples, deliberately at opposite ends:
 | | What it shows |
 |---|---|
 | [`_template/`](./_template) | The skeleton. ~100 lines, standard library, runs with no install. **Start here.** |
-| [`realty-lead-gen/`](./realty-lead-gen) | A worked reference. Real dependencies, database, migrations, its own CI. What a mature agent looks like. |
+| [`realty-lead-gen/`](./realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
 
 Copy the template. Read the reference when you need to see how something is
 done at scale.
