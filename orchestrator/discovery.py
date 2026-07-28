@@ -133,6 +133,15 @@ def integration_problems(registry: Registry) -> list[str]:
             )
 
         problems.extend(
+            f"{manifest.name}: {unwanted} is not a file an agent may ship. "
+            f"An agent is source, tests and its manifest — see "
+            f"{TEMPLATE_DIR}/ for the whole of what one needs. If yours "
+            f"genuinely requires this, say why in the pull request rather "
+            f"than widening the list."
+            for unwanted in _unallowed_files(manifest.workdir)
+        )
+
+        problems.extend(
             f"{where}: capability '{capability.name}' declares no {field}. "
             f"The schemas are how a caller learns to invoke you — an empty one "
             f"documents nothing."
@@ -199,6 +208,58 @@ MAX_SCANNED_BYTES = 1024 * 1024
 #: as the contributor's own. Exact-match comparison was defeated by editing one
 #: character, which is not the same as writing a description.
 MAX_TEMPLATE_SIMILARITY = 0.8
+
+
+#: What an agent folder may contain. An allowlist rather than a list of banned
+#: things: the banned list is infinite and the allowed one is short, so the
+#: allowlist is both smaller and closed — a file type nobody anticipated is
+#: refused instead of admitted.
+#:
+#: It doubles as the mechanical half of the shape rule. `docker-compose.yml`,
+#: `Dockerfile`, `alembic.ini`, `.env`, an archive or a stray `.sql` dump all
+#: fail on their extension alone, so "an agent is not a service" stops being a
+#: reviewer's opinion. Note `.yaml` is NOT allowed generally — only the two
+#: yaml files an agent legitimately owns are named below, because admitting
+#: arbitrary yaml is exactly how a compose file walks in.
+ALLOWED_SUFFIXES = frozenset({".py", ".md", ".toml", ".json", ".lock", ".txt", ".example"})
+
+ALLOWED_NAMES = frozenset(
+    {
+        MANIFEST_NAME,
+        ".pre-commit-config.yaml",
+        ".gitignore",
+        ".python-version",
+        "LICENSE",
+        "Makefile",
+    }
+)
+
+#: Directories that make an agent a service no matter what is inside them. The
+#: allowlist alone cannot catch these: a migrations folder is full of ordinary
+#: `.py` files and would sail through on extension.
+DENIED_DIRS = frozenset({"alembic", "migrations"})
+
+
+def _unallowed_files(workdir: Path) -> list[str]:
+    """Committed paths under `workdir` an agent has no business shipping."""
+    found = []
+    for path in sorted(workdir.rglob("*")):
+        rel = path.relative_to(workdir)
+        parts = set(rel.parts)
+        # Build output and caches are ignored, not rejected: they are not
+        # committed, and failing someone's build because they ran pytest once
+        # would be indefensible.
+        if SKIP_DIRS & parts:
+            continue
+        if denied := DENIED_DIRS & parts:
+            found.append(f"{sorted(denied)[0]}/")
+            continue
+        if not path.is_file():
+            continue
+        if path.name in ALLOWED_NAMES or path.suffix in ALLOWED_SUFFIXES:
+            continue
+        found.append(str(rel))
+    return sorted(set(found))
 
 
 def _files_with_marker(workdir: Path) -> list[str]:

@@ -282,6 +282,83 @@ def test_a_todo_marker_outside_the_manifest_is_caught(tmp_path: Path) -> None:
     assert "agent_main.py" in problems, "the message must name the file to edit"
 
 
+@pytest.mark.parametrize(
+    "unwanted",
+    [
+        "docker-compose.yml",  # the shape rule, mechanised
+        "Dockerfile",
+        "alembic.ini",
+        ".env",  # a real secret, not a template
+        "dump.sql",
+        "data.zip",
+        "notes.rtf",  # nothing anticipated it, so it is refused
+    ],
+)
+def test_a_file_an_agent_may_not_ship_is_caught(tmp_path: Path, unwanted: str) -> None:
+    """An allowlist: unanticipated file types are refused, not admitted.
+
+    This is also what makes "an agent is not a service" a gate rather than a
+    reviewer's opinion — compose files, Dockerfiles and migration config fail
+    on their extension alone.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    assert integration_problems(load_registry(root)) == []
+
+    (agent / unwanted).write_text("x\n", encoding="utf-8")
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "is not a file an agent may ship" in problems
+    assert unwanted in problems, "the message must name the offending file"
+
+
+def test_a_migrations_directory_is_caught_despite_holding_only_python(
+    tmp_path: Path,
+) -> None:
+    """The allowlist cannot see this one: migrations are ordinary `.py`."""
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    versions = agent / "alembic" / "versions"
+    versions.mkdir(parents=True)
+    (versions / "0001_init.py").write_text("# migration\n", encoding="utf-8")
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "alembic/" in problems
+
+
+def test_the_allowlist_admits_everything_a_real_agent_needs(tmp_path: Path) -> None:
+    """A false positive here blocks honest work, so pin the whole surface."""
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    for wanted in (
+        "helper.py",
+        "NOTES.md",
+        "pyproject.toml",
+        "uv.lock",
+        "fixtures.json",
+        "requirements.txt",
+        ".env.example",
+        ".gitignore",
+        ".python-version",
+        "Makefile",
+        ".pre-commit-config.yaml",
+    ):
+        (agent / wanted).write_text("x\n", encoding="utf-8")
+
+    assert integration_problems(load_registry(root)) == []
+
+
+def test_caches_are_ignored_rather_than_rejected(tmp_path: Path) -> None:
+    """Someone who ran pytest once must not fail the gate for it."""
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    for noise in (".venv/lib/thing.so", "__pycache__/x.pyc", ".ruff_cache/data.bin"):
+        path = agent / noise
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n", encoding="utf-8")
+
+    assert integration_problems(load_registry(root)) == []
+
+
 def test_a_capability_without_schemas_is_caught(tmp_path: Path) -> None:
     """A missing schema silently defaulted to `{}` and documented nothing."""
     root = _repo(tmp_path)

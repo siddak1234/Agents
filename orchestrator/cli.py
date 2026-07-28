@@ -29,10 +29,12 @@ from typing import Any
 from orchestrator.contract import DESCRIBE, CallRequest, CallResult
 from orchestrator.discovery import (
     AGENTS_DIR,
+    REGISTRY_NAME,
     DiscoveryError,
     Registry,
     integration_problems,
     load_registry,
+    repo_root,
 )
 from orchestrator.manifest import AgentManifest
 from orchestrator.runner import build_env, call, describe
@@ -45,6 +47,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 2
+
+    # `scope` judges the diff, not the manifests, and it is the cheapest gate
+    # — so it must run even when the registry does not load. That is precisely
+    # the state a contributor is in when their branch has strayed, and making
+    # them fix a manifest before they can be told they edited shared code gets
+    # the order backwards.
+    if args.command == "scope":
+        try:
+            return _cmd_scope(_resolve_root(args.root), args)
+        except DiscoveryError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     try:
         registry = load_registry(args.root)
@@ -91,6 +105,125 @@ def _cmd_new(registry: Registry, args: argparse.Namespace) -> int:
         f"the list of things that make this an agent rather than a copy."
     )
     return 0
+
+
+def _resolve_root(root: Path | None) -> Path:
+    """The repository root, without requiring the registry to be loadable."""
+    return (root or repo_root()).resolve()
+
+
+def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
+    """Refuse a branch that adds an agent and edits the platform as well.
+
+    The other gates ask "is this agent well made?". This one asks "did this
+    change stay where it belongs?" — the question that matters when the author
+    is a contributor whose editor may have reformatted a file they never meant
+    to open. An agent's own folder is theirs; everything else is shared, and a
+    shared-code change hidden inside a new-agent pull request is the one thing
+    review is least likely to notice.
+
+    A pull request that touches no agent folder is not this command's business:
+    platform work is legitimate and reviewed on its own terms.
+    """
+    try:
+        changed = _changed_paths(root, args.base)
+    except _ScopeUnavailableError as exc:
+        # No git, no base ref, a shallow clone. Not a violation — a check that
+        # could not run, and saying otherwise would block on a fork's clone
+        # depth rather than on anything the author did.
+        print(f"skipped: {exc}", file=sys.stderr)
+        return 0
+
+    if not changed:
+        print("no changes against the base; nothing to scope")
+        return 0
+
+    touched_agents = sorted(
+        {
+            name
+            for path in changed
+            if path.startswith(f"{AGENTS_DIR}/") and "/" in path[len(AGENTS_DIR) + 1 :]
+            # A leading underscore means "not an agent" here as everywhere
+            # else: `agents/_template` is the blueprint, platform-owned and
+            # linted by root tooling, so editing it is platform work and must
+            # not trip the one-agent rule.
+            for name in [path.split("/")[1]]
+            if not name.startswith("_")
+        }
+    )
+    if not touched_agents:
+        print("no agent folders touched; scope check does not apply")
+        return 0
+
+    allowed_prefixes = tuple(f"{AGENTS_DIR}/{name}/" for name in touched_agents)
+    strays = [
+        path
+        for path in changed
+        if not path.startswith(allowed_prefixes)
+        and path not in {REGISTRY_NAME, "README.md"}
+        and not path.startswith("docs/")
+    ]
+
+    problems = []
+    if len(touched_agents) > 1:
+        problems.append(
+            f"this branch touches {len(touched_agents)} agents "
+            f"({', '.join(touched_agents)}). One agent per pull request — "
+            f"split it, so a problem with one cannot hold up the other."
+        )
+    problems.extend(
+        f"{path} is outside your agent's folder. A pull request that adds or "
+        f"changes an agent may touch only {AGENTS_DIR}/<your-agent>/, "
+        f"{REGISTRY_NAME}, README.md and docs/."
+        for path in strays
+    )
+
+    if problems:
+        # Capped: a branch that strayed widely produces one problem per file,
+        # and a hundred identical lines buries the one sentence that explains
+        # what to do about them.
+        for problem in problems[:MAX_SCOPE_PROBLEMS]:
+            print(f"error: {problem}", file=sys.stderr)
+        if len(problems) > MAX_SCOPE_PROBLEMS:
+            print(
+                f"error: ...and {len(problems) - MAX_SCOPE_PROBLEMS} more.",
+                file=sys.stderr,
+            )
+        print(
+            f"\n{len(problems)} problem(s). If you meant to change shared code, "
+            f"raise it as its own pull request — that way it is reviewed as a "
+            f"change to every agent, which is what it is.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"ok    scope: {', '.join(touched_agents)} (+ registry, README, docs)")
+    return 0
+
+
+#: How many stray paths to name before summarising. Enough to see the pattern,
+#: few enough that the explanation underneath is still on screen.
+MAX_SCOPE_PROBLEMS = 10
+
+
+class _ScopeUnavailableError(Exception):
+    """The diff could not be taken, so there is nothing to judge."""
+
+
+def _changed_paths(root: Path, base: str) -> list[str]:
+    """Repo-relative paths differing from `base`, via git's merge base."""
+    if not (root / ".git").exists():
+        raise _ScopeUnavailableError(f"{root} is not a git repository")
+    completed = subprocess.run(  # noqa: S603 — argv is fixed; `base` is a ref name
+        ["git", "diff", "--name-only", f"{base}...HEAD"],  # noqa: S607
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise _ScopeUnavailableError(f"cannot diff against {base!r}: {completed.stderr.strip()}")
+    return [line for line in completed.stdout.splitlines() if line]
 
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
@@ -599,6 +732,15 @@ def _parser() -> argparse.ArgumentParser:
         "agents",
         nargs="*",
         help="agent names to check and test. Omit to cover every registered agent.",
+    )
+
+    p_scope = sub.add_parser(
+        "scope", help="check that a branch changes only what an agent change may"
+    )
+    p_scope.add_argument(
+        "--base",
+        default="origin/main",
+        help="branch or ref to diff against (default: origin/main)",
     )
     return parser
 

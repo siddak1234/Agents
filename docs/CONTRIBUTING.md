@@ -42,6 +42,13 @@ repository refuses to use). An agent that needs any of the following is a
 - Docker, docker-compose, or any "start this first" step
 - a background worker or job queue
 
+Most of that list is now **enforced, not reviewed**: `agents list --strict`
+refuses a file an agent has no business shipping. What an agent folder may
+contain is a short allowlist — `.py`, `.md`, `.toml`, `.json`, `.lock`,
+`.txt`, `.example`, plus `agent.yaml`, `LICENSE`, `Makefile`, `.gitignore`,
+`.python-version` and `.pre-commit-config.yaml`. A `docker-compose.yml`, a
+`Dockerfile`, an `alembic/` folder or a stray `.env` fails the build.
+
 Needing one of these is not a sin — it means you are building a service, and
 a service belongs in its own repository, exposing an `agentcall/v1` adapter
 here only if something actually calls it. If a *capability* genuinely
@@ -151,7 +158,12 @@ your diff for, which is why a reviewer's finding on them is blocking.
 
 ## Opening the PR
 
-Small and complete beats large and staged. One agent per PR.
+Small and complete beats large and staged. **One agent per PR, and nothing
+outside it** — `agents scope` enforces both. A branch that adds an agent may
+touch only `agents/<your-agent>/`, `registry.yaml`, `README.md` and `docs/`.
+Anything else fails, including a file your editor reformatted on save. If you
+genuinely need to change shared code, raise that as its own pull request:
+then it is reviewed as a change to *every* agent, which is what it is.
 
 ```
 /raise-pr Add weather-agent

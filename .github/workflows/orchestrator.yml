@@ -33,6 +33,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `agents scope` diffs against the base; a shallow clone has no
+          # merge base to diff from and the check would skip itself.
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
@@ -42,6 +46,33 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Sync
         run: uv sync --frozen
+
+      # Cheapest gate, so it runs first: did this branch change only what an
+      # agent change may? A stray edit to shared code inside a new-agent pull
+      # request is the thing review is least likely to catch, and finding out
+      # before the build runs is the point.
+      # Enforced for everyone except the repository owner. The rule exists to
+      # stop a contributor's agent pull request carrying a stray edit to
+      # shared code; the owner is not that threat model, and is the one who
+      # has to land migrations that legitimately move agents and platform
+      # together. The check still RUNS for the owner and still prints — it
+      # just does not fail the build, so a genuine mistake is still visible.
+      - name: Scope
+        run: |
+          if uv run agents scope --base "origin/${{ github.base_ref || 'main' }}"; then
+            exit 0
+          fi
+          if [ "${{ github.event.pull_request.author_association }}" = "OWNER" ]; then
+            echo "::warning::Scope check failed, but the author owns this repository, so it is reported rather than enforced. If this is not a migration, split the pull request."
+            exit 0
+          fi
+          exit 1
+
+      # A 50 MB commit passed CI until this line: check-added-large-files was
+      # pinned in the pre-commit config but only ever ran locally, so anyone
+      # who never installed the hooks — every fork contributor — bypassed it.
+      - name: Reject oversized files
+        run: uv run pre-commit run check-added-large-files --all-files
 
       # Secret scanning, same pin as the pre-commit hook. It ran locally on
       # every commit and in CI on none — which meant `--no-verify`, a

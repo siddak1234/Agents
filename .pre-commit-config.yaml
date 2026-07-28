@@ -73,6 +73,20 @@ repos:
         # while both hooks reported "no files to check".
         files: ^(registry\.yaml|orchestrator/.*|.*/agent\.yaml|.*/agent_main\.py|.*/agentcall\.py)$
 
+      # Same question CI asks, asked before the push rather than before each
+      # commit: straying is a property of the branch, and blocking a
+      # work-in-progress commit that will be amended teaches nothing. Install
+      # with `pre-commit install --hook-type pre-push` to get it locally; CI
+      # is the authority either way, and the command skips itself when
+      # `origin/main` is absent or stale rather than guessing.
+      - id: agents-scope
+        name: agents scope
+        entry: uv run --frozen agents scope
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       # The integration gate, run before the commit rather than after the
       # push. CI enforces it either way; the difference is whether a
       # contributor finds out in two seconds or after waiting for a build.

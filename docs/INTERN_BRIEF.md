@@ -184,6 +184,25 @@ secret, never editing the scanner).
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.
 
+### What your pull request may contain
+
+Two rules, both enforced by the build rather than by a reviewer's patience:
+
+**One agent, nothing else.** Your branch may touch `agents/<your-agent>/`,
+`registry.yaml`, `README.md` and `docs/`. Not `orchestrator/`, not another
+person's agent, not `.github/`. If your editor reformats a shared file on
+save, the build fails and names it — that is the check working.
+
+**Only files an agent ships.** Inside your folder: `.py`, `.md`, `.toml`,
+`.json`, `.lock`, `.txt`, `.example`, plus `agent.yaml`, `LICENSE`,
+`Makefile`, `.gitignore`, `.python-version`, `.pre-commit-config.yaml`.
+A `docker-compose.yml`, a `Dockerfile`, an `alembic/` folder or a `.env`
+fails — those mean you are building a service, not an agent.
+
+`agents/_template/` is the whole of what an agent needs. If you are unsure
+whether a file belongs, compare against it: it is the blueprint, it runs,
+and CI exercises it on every build.
+
 ## Part 5 — Open the pull request
 
 ```bash
