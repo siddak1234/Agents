@@ -39,6 +39,10 @@ cache_dir = ".cache/pytest"
 # was run by no gate at all — root pytest did not collect it, and `agents
 # test` skips unregistered folders — so it could break and the first person to
 # find out would be an intern debugging their own copy of it.
+# Do NOT add a real agent's tests here. Each agent runs its own suite from
+# its own folder via `runtime.test`, which makes that folder the rootdir; two
+# agents both copying the template's `tests/test_agent.py` collide on module
+# name the moment they share one rootdir, and pytest fails at collection.
 testpaths = ["orchestrator/tests", "agents/_template/tests"]
 
 # The orchestrator is held to the same bar it asks of agents. realty-lead-gen
