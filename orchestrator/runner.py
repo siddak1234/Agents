@@ -10,8 +10,8 @@ Four invariants this module exists to hold:
     interpreter with its own dependency set, so one agent's conflict cannot
     break another or the orchestrator.
   * The agent's working directory is its own folder. Everything inside an
-    agent that resolves a relative path — `.env`, `alembic.ini` — depends on
-    this, and getting it wrong misconfigures silently rather than loudly.
+    agent that resolves a relative path — `.env`, `pyproject.toml` — depends
+    on this, and getting it wrong misconfigures silently rather than loudly.
   * An agent sees only the environment it declared. Deny by default.
   * An agent cannot exhaust this process's memory by writing to stdout.
 """

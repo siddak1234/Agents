@@ -54,8 +54,8 @@ jobs:
       - name: Deterministic gates
         run: |
           uv run agents list --strict
-          uv run ruff format --check orchestrator tests _template
-          uv run ruff check orchestrator tests _template
+          uv run ruff format --check orchestrator agents/_template
+          uv run ruff check orchestrator agents/_template
           uv run mypy orchestrator
           uv run pytest -q
 

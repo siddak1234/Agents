@@ -35,10 +35,10 @@ repos:
     rev: v0.14.0
     hooks:
       - id: ruff-format
-        files: ^(orchestrator|tests|_template)/
+        files: ^(orchestrator|agents/_template)/
       - id: ruff
         args: [--fix]
-        files: ^(orchestrator|tests|_template)/
+        files: ^(orchestrator|agents/_template)/
 
   - repo: local
     hooks:
@@ -72,6 +72,20 @@ repos:
         # file. Proven by a commit that changed three orchestrator modules
         # while both hooks reported "no files to check".
         files: ^(registry\.yaml|orchestrator/.*|.*/agent\.yaml|.*/agent_main\.py|.*/agentcall\.py)$
+
+      # Same question CI asks, asked before the push rather than before each
+      # commit: straying is a property of the branch, and blocking a
+      # work-in-progress commit that will be amended teaches nothing. Install
+      # with `pre-commit install --hook-type pre-push` to get it locally; CI
+      # is the authority either way, and the command skips itself when
+      # `origin/main` is absent or stale rather than guessing.
+      - id: agents-scope
+        name: agents scope
+        entry: uv run --frozen agents scope
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
 
       # The integration gate, run before the commit rather than after the
       # push. CI enforces it either way; the difference is whether a

@@ -140,10 +140,12 @@ uv run agents new my-agent    # use your agent's real name, lowercase-with-hyphe
 git checkout -b my-agent
 ```
 
-That copies the template, sets the name in the two files that must agree,
-registers it, and adds it to the README table. It deliberately does **not**
-write your description, your capabilities, or a LICENSE — those are the
-decisions that make it an agent instead of a copy.
+That creates `agents/my-agent/` from the template, sets the name in the two
+files that must agree, registers it, and adds it to the README table. Agents
+live under `agents/` — tenant space; everything outside it is the platform.
+The command deliberately does **not** write your description, your
+capabilities, or a LICENSE — those are the decisions that make it an agent
+instead of a copy.
 
 ## Part 4 — Build it
 
@@ -154,14 +156,22 @@ uv run agents verify
 Run this whenever you want to know where you stand. It runs every
 deterministic check CI runs and prints all of them at once. **It will fail at
 first, and the list it prints is your to-do list.** When it prints
-`All 9 gates pass`, you are done. (CI has exactly one check beyond these — a
-model-driven review board — and it needs a token the repository owner
-configures.)
+`All 10 gates pass`, you are done. If it instead reports that some gates *did
+not run*, that is not a pass — a tool or `.git` is missing locally, and CI
+will still run them.
 
-The nine, so you know what is being asked of you:
+Two CI checks are outside this command, and it prints a reminder of the one
+you can act on. `agents scope` compares your branch against `main`, which
+needs a base this command has no way to guess — run
+`uv run agents scope --base origin/main` before you push. The other is the
+model-driven review board, which needs a token the repository owner
+configures.
+
+The ten, so you know what is being asked of you:
 
 | Gate | Asks |
 |---|---|
+| `large files` | Is anything committed over 512 KB? An agent is source, not data. |
 | `secret scan` | Did a credential end up in a committed file? (gitleaks) |
 | `ruff format` | Is repository-owned code formatted? |
 | `ruff check` | Is it lint-clean? |
@@ -172,14 +182,33 @@ The nine, so you know what is being asked of you:
 | `agents lint` | Does your own declared lint command pass? Root tooling does not check your code. |
 | `agents test` | Does your own declared test command pass, from your folder? |
 
-The last four are about your agent. The first five are about the repository,
+The last four are about your agent. The first six are about the repository,
 and should already pass — if one of them breaks, you changed something
-outside your folder (the secret scan being the exception worth respecting:
-it fails on *your* committed credential, and fixing it means removing the
-secret, never editing the scanner).
+outside your folder (the secret scan and the large-file cap being the
+exceptions worth respecting: both fail on what *you* committed, and fixing
+them means removing the file, never editing the scanner).
 
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.
+
+### What your pull request may contain
+
+Two rules, both enforced by the build rather than by a reviewer's patience:
+
+**One agent, nothing else.** Your branch may touch `agents/<your-agent>/`,
+`registry.yaml`, `README.md` and `docs/`. Not `orchestrator/`, not another
+person's agent, not `.github/`. If your editor reformats a shared file on
+save, the build fails and names it — that is the check working.
+
+**Only files an agent ships.** Inside your folder: `.py`, `.md`, `.toml`,
+`.json`, `.lock`, `.txt`, `.example`, plus `agent.yaml`, `LICENSE`,
+`Makefile`, `.gitignore`, `.python-version`, `.pre-commit-config.yaml`.
+A `docker-compose.yml`, a `Dockerfile`, an `alembic/` folder or a `.env`
+fails — those mean you are building a service, not an agent.
+
+`agents/_template/` is the whole of what an agent needs. If you are unsure
+whether a file belongs, compare against it: it is the blueprint, it runs,
+and CI exercises it on every build.
 
 ## Part 5 — Open the pull request
 
@@ -214,7 +243,8 @@ Request in, on stdin:
 
 ```json
 {"protocol": "agentcall/v1", "capability": "normalize_address",
- "input": {"address": "123 north main street"}}
+ "input": {"address": "123 north main street"},
+ "request_id": "", "deadline_ms": 120000}
 ```
 
 Success envelope out, on stdout:
@@ -249,8 +279,8 @@ There are exactly five error types. Do not invent a sixth.
 `retryable` is not a judgement call — read it off that table. It tells a
 caller whether trying again could possibly help.
 
-**All of these are `invalid_request`**, and the skeleton below handles every
-one — do not remove any of them: stdin that is not valid JSON, a request that
+**All of these are `invalid_request`**, and the skeleton below handles them —
+do not remove any of the checks: stdin that is not valid JSON, a request that
 is not a JSON object, a `protocol` that is not `agentcall/v1`, a missing or
 non-string `capability`, an `input` that is not an object, and an unknown
 capability. Your own field validation is on top of these, not instead.
@@ -268,10 +298,10 @@ board blocks on.
 
 (Maintainers: this list deliberately restates the contract so the page stays
 self-contained for a chat with no repo access. The mapping to
-`AGENT_PROTOCOL.md`: rules 1–4 here are §"Rules an agent must follow" 1–4;
-rule 5 here restates the deny-by-default environment rule from §"What the
-orchestrator guarantees"; rule 6 here is that section's rule 5, "Import
-lazily". The protocol's rule 6 — declare every capability in `agent.yaml` —
+`docs/AGENT_PROTOCOL.md`: rules 1–4 here are §"Rules an agent must follow" 1–4;
+rule 5 here restates the deny-by-default environment rule, which the protocol
+states in §"What the orchestrator guarantees" rather than in its numbered
+list; rule 6 here is the protocol's rule 5, "Import lazily". The protocol's rule 6 — declare every capability in `agent.yaml` —
 is covered by this page's manifest section instead. Editing any of those
 means editing both files.)
 
@@ -379,7 +409,7 @@ prove nothing. `agents check` exists precisely to catch them disagreeing.
 This is the template's `agent_main.py`, lightly adapted for this page — the
 name is a placeholder and the `RULE n` comments are numbered to match the
 list above, so this copy and that list cannot disagree. Start from this — it
-already satisfies rules 1, 2 and 3. Replace `greet` with your capability, and
+already satisfies rules 1, 2 and 4. Replace `greet` with your capability, and
 move anything that is real work into a separate module. (If you cloned the
 repo, `uv run agents new my-agent` gives you the same skeleton with the
 renames already done.)
@@ -532,14 +562,15 @@ Plus two edits outside your folder, which `agents new` writes for you. If you
 built the folder by hand, make them yourself — without them your agent is
 never callable, because discovery is by declaration and never by globbing.
 
-`registry.yaml` at the repository root, in full — add the last line:
+`registry.yaml` at the repository root — it opens with a comment header
+explaining discovery-by-declaration; leave that alone and add the last line:
 
 ```yaml
 version: 2
 
 agents:
-  - path: realty-lead-gen
-  - path: my-agent
+  - path: agents/realty-lead-gen
+  - path: agents/my-agent
 ```
 
 Paths only. Everything else about your agent lives in your own `agent.yaml`.
@@ -551,9 +582,13 @@ The agents table in the root `README.md` — add the last row:
 
 | Agent | Status | Capabilities |
 |---|---|---|
-| [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
-| [`my-agent`](./my-agent) | active | `your_capability` |
+| [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
+| [`my-agent`](./agents/my-agent) | active | `your_capability` |
 ```
+
+`agents new` writes that row for you with a literal `TODO` in the last cell.
+Nothing checks it afterwards — the marker scan looks for `TODO(new agent)`,
+not a bare `TODO` — so replacing it with your real capabilities is on you.
 
 `active` is the status to use. List your real capabilities, not `describe` —
 every agent has that one.

@@ -82,6 +82,10 @@ htmlcov/
 .pytest_cache/
 
 # --- Language caches ---------------------------------------------------
+# Tool caches are pointed at .cache/ in pyproject.toml so they stay out of
+# the root listing. The individual names stay listed here: a tool run with a
+# different config, or an older version, still writes them to the root.
+.cache/
 __pycache__/
 *.py[cod]
 .mypy_cache/

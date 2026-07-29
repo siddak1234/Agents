@@ -26,7 +26,7 @@ from pathlib import Path
 
 import yaml
 
-from orchestrator.discovery import REGISTRY_NAME, TEMPLATE_DIR
+from orchestrator.discovery import AGENTS_DIR, REGISTRY_NAME, TEMPLATE_DIR, TEMPLATE_NAME
 
 #: Lowercase, digits and single hyphens. This becomes a folder name, a YAML
 #: key, a CLI argument and a URL path segment; anything else is a portability
@@ -53,7 +53,7 @@ class ScaffoldError(Exception):
 
 
 def create_agent(root: Path, name: str) -> list[str]:
-    """Create `root/name` from the template. Returns what was done, in order.
+    """Create `root/agents/name` from the template. Returns what was done.
 
     Raises `ScaffoldError` before touching anything if the name is unusable,
     so a rejected name never leaves a half-made folder behind.
@@ -65,12 +65,13 @@ def create_agent(root: Path, name: str) -> list[str]:
     if not template.is_dir():
         raise ScaffoldError(f"no {TEMPLATE_DIR}/ to copy from at {root}")
 
-    target = root / name
+    target = root / AGENTS_DIR / name
+    target.parent.mkdir(exist_ok=True)
     # `__pycache__` from someone running the template locally would otherwise
     # be the new agent's first committed file.
     shutil.copytree(template, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
-    done = [f"created {name}/ from {TEMPLATE_DIR}/"]
+    done = [f"created {AGENTS_DIR}/{name}/ from {TEMPLATE_DIR}/"]
     done.append(_rename(target, name))
     done.append(_register(root, name))
     done.append(_add_readme_row(root, name))
@@ -87,8 +88,10 @@ def _validate(root: Path, name: str) -> None:
         raise ScaffoldError(f"{name!r} is reserved for repository tooling. Pick another name.")
     if name.startswith("_"):
         raise ScaffoldError(f"a leading underscore means 'not an agent'; {name!r} would never load")
-    if (root / name).exists():
-        raise ScaffoldError(f"{name}/ already exists. Pick another name, or delete it first.")
+    if (root / AGENTS_DIR / name).exists():
+        raise ScaffoldError(
+            f"{AGENTS_DIR}/{name}/ already exists. Pick another name, or delete it first."
+        )
 
 
 def _rename(target: Path, name: str) -> str:
@@ -101,14 +104,14 @@ def _rename(target: Path, name: str) -> str:
     """
     manifest = target / "agent.yaml"
     manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace(f"name: {TEMPLATE_DIR}", f"name: {name}", 1),
+        manifest.read_text(encoding="utf-8").replace(f"name: {TEMPLATE_NAME}", f"name: {name}", 1),
         encoding="utf-8",
     )
 
     entry = target / "agent_main.py"
     entry.write_text(
         entry.read_text(encoding="utf-8").replace(
-            f'AGENT_NAME = "{TEMPLATE_DIR}"', f'AGENT_NAME = "{name}"', 1
+            f'AGENT_NAME = "{TEMPLATE_NAME}"', f'AGENT_NAME = "{name}"', 1
         ),
         encoding="utf-8",
     )
@@ -118,7 +121,7 @@ def _rename(target: Path, name: str) -> str:
 def _check_registry_shape(root: Path) -> None:
     """Refuse to scaffold against a registry the textual append would corrupt.
 
-    `_register` appends `  - path: <name>` to the end of the file, which is
+    `_register` appends `  - path: agents/<name>` to the end of the file, which is
     only correct when `agents:` is the last top-level key with its entries (or
     nothing) beneath it. A registry with no `agents:` key at all used to get
     the entry appended anyway — the file then parsed as a bare list, every
@@ -154,13 +157,13 @@ def _register(root: Path, name: str) -> str:
     """
     path = root / REGISTRY_NAME
     text = path.read_text(encoding="utf-8")
-    if re.search(rf"^\s*-\s*path:\s*{re.escape(name)}\s*$", text, re.M):
+    if re.search(rf"^\s*-\s*path:\s*(?:{AGENTS_DIR}/)?{re.escape(name)}\s*$", text, re.M):
         return f"{REGISTRY_NAME} already lists {name}"
 
-    appended = f"{text.rstrip()}\n  - path: {name}\n"
+    appended = f"{text.rstrip()}\n  - path: {AGENTS_DIR}/{name}\n"
     if not _registers_cleanly(appended, name):
         raise ScaffoldError(
-            f"{path}: appending `- path: {name}` would not land under `agents:` "
+            f"{path}: appending `- path: {AGENTS_DIR}/{name}` would not land under `agents:` "
             f"— is `agents:` the last key in the file? Add the entry by hand."
         )
     path.write_text(appended, encoding="utf-8")
@@ -179,7 +182,8 @@ def _registers_cleanly(text: str, name: str) -> bool:
     if not isinstance(entries, list):
         return False
     return any(
-        (entry.get("path") if isinstance(entry, dict) else entry) == name for entry in entries
+        (entry.get("path") if isinstance(entry, dict) else entry) == f"{AGENTS_DIR}/{name}"
+        for entry in entries
     )
 
 
@@ -194,7 +198,7 @@ def _add_readme_row(root: Path, name: str) -> str:
         return "no README.md to update"
 
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    row = f"| [`{name}`](./{name}) | active | `TODO` |\n"
+    row = f"| [`{name}`](./{AGENTS_DIR}/{name}) | active | `TODO` |\n"
 
     # Find the header separator (`|---|---|`), then take every row under it
     # until the table ends. Anchoring on the separator rather than on a

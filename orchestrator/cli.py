@@ -9,8 +9,10 @@
     agents new <name>
     agents verify [agents…]
 
-`verify` is the contributor's command: every deterministic gate CI runs,
-reported at once. (The review board in CI is model-driven and not here.)
+`verify` is the contributor's command: every deterministic gate CI runs on the
+working tree, reported at once. Two CI checks are deliberately outside it and
+both are named where that is decided — the model-driven review board, and
+`agents scope`, which needs a base branch to diff against (see `_NOT_COVERED`).
 `check` is the cheap heart of it — it loads every manifest and calls
 `describe` on every agent, which catches a registry that has drifted from
 disk, a broken entrypoint, or a manifest that no longer matches its code.
@@ -28,10 +30,13 @@ from typing import Any
 
 from orchestrator.contract import DESCRIBE, CallRequest, CallResult
 from orchestrator.discovery import (
+    AGENTS_DIR,
+    REGISTRY_NAME,
     DiscoveryError,
     Registry,
     integration_problems,
     load_registry,
+    repo_root,
 )
 from orchestrator.manifest import AgentManifest
 from orchestrator.runner import build_env, call, describe
@@ -44,6 +49,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 2
+
+    # `scope` judges the diff, not the manifests, and it is the cheapest gate
+    # — so it must run even when the registry does not load. That is precisely
+    # the state a contributor is in when their branch has strayed, and making
+    # them fix a manifest before they can be told they edited shared code gets
+    # the order backwards.
+    if args.command == "scope":
+        try:
+            return _cmd_scope(_resolve_root(args.root), args)
+        except DiscoveryError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     try:
         registry = load_registry(args.root)
@@ -75,7 +92,7 @@ def _cmd_new(registry: Registry, args: argparse.Namespace) -> int:
     for step in done:
         print(f"  {step}")
     print(
-        f"\nNext, in {args.name}/:\n"
+        f"\nNext, in {AGENTS_DIR}/{args.name}/:\n"
         f"  1. agent.yaml — write the description and your real capabilities,\n"
         f"     each with an input and an output schema. Point runtime.lint at\n"
         f"     real linting once you have dependencies; nothing else checks\n"
@@ -90,6 +107,125 @@ def _cmd_new(registry: Registry, args: argparse.Namespace) -> int:
         f"the list of things that make this an agent rather than a copy."
     )
     return 0
+
+
+def _resolve_root(root: Path | None) -> Path:
+    """The repository root, without requiring the registry to be loadable."""
+    return (root or repo_root()).resolve()
+
+
+def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
+    """Refuse a branch that adds an agent and edits the platform as well.
+
+    The other gates ask "is this agent well made?". This one asks "did this
+    change stay where it belongs?" — the question that matters when the author
+    is a contributor whose editor may have reformatted a file they never meant
+    to open. An agent's own folder is theirs; everything else is shared, and a
+    shared-code change hidden inside a new-agent pull request is the one thing
+    review is least likely to notice.
+
+    A pull request that touches no agent folder is not this command's business:
+    platform work is legitimate and reviewed on its own terms.
+    """
+    try:
+        changed = _changed_paths(root, args.base)
+    except _ScopeUnavailableError as exc:
+        # No git, no base ref, a shallow clone. Not a violation — a check that
+        # could not run, and saying otherwise would block on a fork's clone
+        # depth rather than on anything the author did.
+        print(f"skipped: {exc}", file=sys.stderr)
+        return 0
+
+    if not changed:
+        print("no changes against the base; nothing to scope")
+        return 0
+
+    touched_agents = sorted(
+        {
+            name
+            for path in changed
+            if path.startswith(f"{AGENTS_DIR}/") and "/" in path[len(AGENTS_DIR) + 1 :]
+            # A leading underscore means "not an agent" here as everywhere
+            # else: `agents/_template` is the blueprint, platform-owned and
+            # linted by root tooling, so editing it is platform work and must
+            # not trip the one-agent rule.
+            for name in [path.split("/")[1]]
+            if not name.startswith("_")
+        }
+    )
+    if not touched_agents:
+        print("no agent folders touched; scope check does not apply")
+        return 0
+
+    allowed_prefixes = tuple(f"{AGENTS_DIR}/{name}/" for name in touched_agents)
+    strays = [
+        path
+        for path in changed
+        if not path.startswith(allowed_prefixes)
+        and path not in {REGISTRY_NAME, "README.md"}
+        and not path.startswith("docs/")
+    ]
+
+    problems = []
+    if len(touched_agents) > 1:
+        problems.append(
+            f"this branch touches {len(touched_agents)} agents "
+            f"({', '.join(touched_agents)}). One agent per pull request — "
+            f"split it, so a problem with one cannot hold up the other."
+        )
+    problems.extend(
+        f"{path} is outside your agent's folder. A pull request that adds or "
+        f"changes an agent may touch only {AGENTS_DIR}/<your-agent>/, "
+        f"{REGISTRY_NAME}, README.md and docs/."
+        for path in strays
+    )
+
+    if problems:
+        # Capped: a branch that strayed widely produces one problem per file,
+        # and a hundred identical lines buries the one sentence that explains
+        # what to do about them.
+        for problem in problems[:MAX_SCOPE_PROBLEMS]:
+            print(f"error: {problem}", file=sys.stderr)
+        if len(problems) > MAX_SCOPE_PROBLEMS:
+            print(
+                f"error: ...and {len(problems) - MAX_SCOPE_PROBLEMS} more.",
+                file=sys.stderr,
+            )
+        print(
+            f"\n{len(problems)} problem(s). If you meant to change shared code, "
+            f"raise it as its own pull request — that way it is reviewed as a "
+            f"change to every agent, which is what it is.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"ok    scope: {', '.join(touched_agents)} (+ registry, README, docs)")
+    return 0
+
+
+#: How many stray paths to name before summarising. Enough to see the pattern,
+#: few enough that the explanation underneath is still on screen.
+MAX_SCOPE_PROBLEMS = 10
+
+
+class _ScopeUnavailableError(Exception):
+    """The diff could not be taken, so there is nothing to judge."""
+
+
+def _changed_paths(root: Path, base: str) -> list[str]:
+    """Repo-relative paths differing from `base`, via git's merge base."""
+    if not (root / ".git").exists():
+        raise _ScopeUnavailableError(f"{root} is not a git repository")
+    completed = subprocess.run(  # noqa: S603 — argv is fixed; `base` is a ref name
+        ["git", "diff", "--name-only", f"{base}...HEAD"],  # noqa: S607
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise _ScopeUnavailableError(f"cannot diff against {base!r}: {completed.stderr.strip()}")
+    return [line for line in completed.stdout.splitlines() if line]
 
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
@@ -333,17 +469,49 @@ def _run_declared(selected: list[AgentManifest], field: str) -> int:
 #: runs" is a promise this list has already broken once: gitleaks was added
 #: to CI and not here, and for that window a branch could print "all gates
 #: pass" while carrying a committed credential that CI would reject.
+#:
+#: The large-file check is here because it broke a second time, the same way.
+#: `test_verify.py` now holds the promise to the workflow file itself, so a
+#: third occurrence fails a test rather than waiting for someone to audit it.
 _TOOL_STEPS = (
+    ("large files", ("pre_commit", "run", "check-added-large-files", "--all-files")),
     ("secret scan", ("pre_commit", "run", "gitleaks", "--all-files")),
-    ("ruff format", ("ruff", "format", "--check", "orchestrator", "tests", "_template")),
-    ("ruff check", ("ruff", "check", "orchestrator", "tests", "_template")),
+    ("ruff format", ("ruff", "format", "--check", "orchestrator", "agents/_template")),
+    ("ruff check", ("ruff", "check", "orchestrator", "agents/_template")),
     ("mypy", ("mypy", "orchestrator")),
     ("pytest", ("pytest", "-q")),
 )
 
 
+#: Deterministic gates CI runs that `verify` deliberately does not, and why.
+#:
+#: Kept as data, and printed, for two reasons. It keeps the promise honest —
+#: `test_verify.py` requires every gate in the workflow to be either run above
+#: or named here — and it tells the contributor the one thing that can still
+#: turn their build red after a clean local run, which is the whole failure
+#: mode this list exists to prevent.
+#:
+#: `agents scope` is here rather than above because it is not the same kind of
+#: check. Every gate above reads the working tree as it stands; scope reads a
+#: *diff*, so it needs a base branch that a local checkout may not have. CI
+#: also enforces it by author — a failure blocks a contributor and only warns
+#: the repository owner — and a local command cannot know which one it is
+#: talking to. Running it here under a guessed base would produce a verdict
+#: that disagrees with CI, which is worse than not running it.
+_NOT_COVERED = (
+    (
+        "agents scope",
+        "it diffs against a base branch, so run `agents scope --base "
+        "origin/main` yourself before you push",
+    ),
+)
+
+
 def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
-    """Run every deterministic gate CI runs; exit non-zero if any failed.
+    """Run every deterministic gate CI runs on the tree; non-zero if any failed.
+
+    "On the tree" is the whole qualification: `agents scope` reads a diff and
+    is listed in `_NOT_COVERED` rather than run here.
 
     Deliberately does not stop at the first failure. A contributor working
     through their first agent wants the whole list — often one root cause
@@ -351,7 +519,8 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
     they can paste somewhere and ask about.
 
     The one thing checked *before* any gate runs is the scope itself: a
-    misspelled agent name must be an error up front, not eight vacuous passes.
+    misspelled agent name must be an error up front, not a run of vacuous
+    passes.
     """
     try:
         _verify_scope(registry, args)
@@ -362,12 +531,18 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
     results: list[tuple[str, str, str]] = []
 
     for label, argv in _TOOL_STEPS:
-        # pre-commit is configuration-driven: with no config at this root
-        # there is nothing to run, which is a SKIP, not a FAIL — a scaffolded
-        # repository without hooks should not be told its secrets leaked.
-        if argv[0] == "pre_commit" and not (registry.root / ".pre-commit-config.yaml").is_file():
-            results.append((label, "SKIP", "no .pre-commit-config.yaml at this root"))
-            continue
+        # pre-commit is configuration-driven and git-driven: with no config,
+        # or outside a git repository, there is nothing it can scan. Both are
+        # a SKIP, not a FAIL — a gate that could not run is not a gate that
+        # found something, and telling someone their secrets leaked because
+        # they have not run `git init` sends them hunting for nothing.
+        if argv[0] == "pre_commit":
+            if not (registry.root / ".pre-commit-config.yaml").is_file():
+                results.append((label, "SKIP", "no .pre-commit-config.yaml at this root"))
+                continue
+            if not (registry.root / ".git").exists():
+                results.append((label, "SKIP", f"{registry.root} is not a git repository"))
+                continue
         completed = subprocess.run(  # noqa: S603 — fixed argv, no user input
             [sys.executable, "-m", *argv],
             cwd=registry.root,
@@ -384,18 +559,25 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
         output = (completed.stdout + completed.stderr).strip()
         results.append((label, "ok" if completed.returncode == 0 else "FAIL", output))
 
-    for label, handler in (
-        ("agents list --strict", _verify_strict),
-        ("agents check", _verify_check),
-        ("agents lint", functools.partial(_verify_declared, field="lint")),
-        ("agents test", functools.partial(_verify_declared, field="test")),
-    ):
+    for label, handler in _AGENT_STEPS:
         results.append((label, *handler(registry, args)))
 
+    return _report_gates(results)
+
+
+def _report_gates(results: list[tuple[str, str, str]]) -> int:
+    """Print every gate's outcome and return the exit code for the run.
+
+    Separate from running them because the two answer different questions and
+    the reporting is the more delicate half: what a contributor concludes from
+    this output is the whole point of the command, and three of the rules below
+    exist because an earlier version let someone conclude the wrong thing.
+    """
     failed = [r for r in results if r[1] == "FAIL"]
+    skipped = [r for r in results if r[1] == "SKIP"]
     for label, status, output in results:
         print(f"{status:<4}  {label}")
-        if status == "FAIL" and output:
+        if status in ("FAIL", "SKIP") and output:
             print("\n".join(f"        {line}" for line in output.splitlines()[:40]))
 
     if failed:
@@ -405,7 +587,26 @@ def _cmd_verify(registry: Registry, args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"\nAll {len(results)} gates pass.")
+
+    # A skipped gate is not a passing gate. Reporting "All 10 gates pass" when
+    # one of them never ran is the same false assurance as a green tick from a
+    # review that did not happen — and CI does not skip, so the contributor
+    # would find out there anyway, later and with less context.
+    if skipped:
+        names = ", ".join(label for label, _, _ in skipped)
+        print(
+            f"\n{len(results) - len(skipped)} of {len(results)} gates pass; "
+            f"{len(skipped)} did not run ({names}). CI runs all of them, so "
+            f"this is not yet the same answer CI will give."
+        )
+    else:
+        print(f"\nAll {len(results)} gates pass.")
+
+    # Said on the way out, not buried in --help: a clean run above is not yet a
+    # green build, and the contributor should hear which gate is still ahead of
+    # them while they are looking at the result.
+    for label, why in _NOT_COVERED:
+        print(f"note  `{label}` is a CI gate this does not run — {why}.")
     return 0
 
 
@@ -458,6 +659,21 @@ def _verify_scope(registry: Registry, args: argparse.Namespace) -> list[AgentMan
     if not args.agents:
         return list(registry)
     return [registry.get(n) for n in args.agents]
+
+
+#: The rest of what `verify` runs: the gates that need a loaded registry rather
+#: than a subprocess. Data beside `_TOOL_STEPS` for the same reason that one is
+#: — between them the two tuples are the whole gate list, so `test_verify.py`
+#: can check it against the workflow instead of a person remembering to.
+#:
+#: Each label is spelled as the command a contributor would type, because it is
+#: also what they read in the output.
+_AGENT_STEPS = (
+    ("agents list --strict", _verify_strict),
+    ("agents check", _verify_check),
+    ("agents lint", functools.partial(_verify_declared, field="lint")),
+    ("agents test", functools.partial(_verify_declared, field="test")),
+)
 
 
 def _describe_drift(manifest: AgentManifest, output: dict[str, Any] | None) -> str | None:
@@ -572,12 +788,21 @@ def _parser() -> argparse.ArgumentParser:
     p_new.add_argument("name", help="folder and agent name, e.g. parcel-geo")
 
     p_verify = sub.add_parser(
-        "verify", help="run every deterministic gate CI runs and report all at once"
+        "verify", help="run every deterministic gate CI runs on the tree, all at once"
     )
     p_verify.add_argument(
         "agents",
         nargs="*",
         help="agent names to check and test. Omit to cover every registered agent.",
+    )
+
+    p_scope = sub.add_parser(
+        "scope", help="check that a branch changes only what an agent change may"
+    )
+    p_scope.add_argument(
+        "--base",
+        default="origin/main",
+        help="branch or ref to diff against (default: origin/main)",
     )
     return parser
 

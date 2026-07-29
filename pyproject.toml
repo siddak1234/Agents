@@ -26,28 +26,42 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["orchestrator"]
+# The platform's own tests live beside the code they test, but they are not
+# part of the shipped package.
+exclude = ["orchestrator/tests"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.14", "mypy>=1.14", "types-PyYAML>=6.0", "pre-commit>=4.0"]
 
 [tool.pytest.ini_options]
-# `_template/tests` is the starter suite every contributor copies. It was run
-# by no gate at all — root pytest did not collect it, and `agents test` skips
-# unregistered folders — so it could break and the first person to find out
-# would be an intern debugging their own copy of it.
-testpaths = ["tests", "_template/tests"]
+cache_dir = ".cache/pytest"
+# `agents/_template/tests` is the starter suite every contributor copies. It
+# was run by no gate at all — root pytest did not collect it, and `agents
+# test` skips unregistered folders — so it could break and the first person to
+# find out would be an intern debugging their own copy of it.
+# Do NOT add a real agent's tests here. Each agent runs its own suite from
+# its own folder via `runtime.test`, which makes that folder the rootdir; two
+# agents both copying the template's `tests/test_agent.py` collide on module
+# name the moment they share one rootdir, and pytest fails at collection.
+testpaths = ["orchestrator/tests", "agents/_template/tests"]
 
 # The orchestrator is held to the same bar it asks of agents. realty-lead-gen
 # runs ruff and strict mypy on itself; shared code that everything else
 # depends on has no business being the unchecked part of the repo.
 
-# Scope: root tooling lints root-owned code only — `orchestrator`, `tests`,
-# and `_template`. Agent folders configure and lint themselves, the same way
-# they own their dependencies; running root's rules over an agent would
-# contradict the isolation the whole design rests on. Commands therefore pass
-# explicit paths rather than `.` (see `make lint` equivalents in CI).
+# Scope: root tooling lints platform code only — `orchestrator` (which now
+# holds its own tests) and `agents/_template`, which the platform owns and
+# ships. Real agent folders configure and lint themselves, the same way they
+# own their dependencies; running root's rules over an agent would contradict
+# the isolation the whole design rests on. Commands pass explicit paths rather
+# than `.` for exactly that reason.
 
 [tool.ruff]
+# Caches go under .cache/, not the root. `.ruff_cache/` and friends are
+# gitignored and never reach a clone, but they do clutter the directory the
+# person building an agent is actually looking at — and "what is .ruff_cache"
+# is a question the layout should not make anyone ask.
+cache-dir = ".cache/ruff"
 line-length = 100
 target-version = "py313"
 
@@ -73,11 +87,13 @@ ignore = [
 "**/tests/*" = ["S101", "S603", "S607", "PLR2004"]
 
 [tool.mypy]
+cache_dir = ".cache/mypy"
 python_version = "3.13"
 strict = true
 warn_unreachable = true
-# Shipped code only, matching realty-lead-gen, which types-checks `src` and
-# `scripts` but not its tests. Strict annotations on pytest fixtures buy
-# little and cost readability. `_template` is excluded for the same reason
+# Shipped code only. Strict annotations on pytest fixtures buy little and
+# cost readability, so the suite is excluded now that it sits inside the
+# package it tests. `agents/_template` is out of scope for the same reason
 # doubled: its job is to be read.
 files = ["orchestrator"]
+exclude = ["^orchestrator/tests/"]

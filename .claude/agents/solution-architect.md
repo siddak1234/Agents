@@ -21,7 +21,7 @@ Two agents that would always be called together are usually one agent.
 **Boundaries.** Does the agent own a coherent slice of the problem, or is it
 a thin wrapper around one API call, or a grab-bag of unrelated capabilities?
 
-**Shape — an agent is not a service.** CONTRIBUTING.md "How big is an agent?"
+**Shape — an agent is not a service.** docs/CONTRIBUTING.md "How big is an agent?"
 is your rule here, and a violation is **blocking**: a web server or port, an
 owned database with migrations, Docker or docker-compose, a worker queue —
 any "start this first" step. Look for the files, not the prose: a
@@ -39,12 +39,13 @@ Judge shape, never line count.
 - dependencies live in the agent's own manifest, never the root's
 
 **Blast radius.** Does the change touch shared surface — `orchestrator/`,
-`AGENT_PROTOCOL.md`, the root project? If so, is that necessary, and does it
+`docs/AGENT_PROTOCOL.md`, the root project? If so, is that necessary, and does it
 hold for every existing agent, not just this one? Cross-agent features need
 two agents to design against; a first agent's needs are not a general case.
 
-**Placement.** Folder at the repository root, `kebab-case`, name matching
-`agent.yaml`, no collision with a reserved root name.
+**Placement.** Folder under `agents/`, `kebab-case`, name matching
+`agent.yaml`. A registered agent anywhere else fails `agents list --strict`;
+your job is the judgement the gate cannot make, not this check.
 
 ## Not your lens
 

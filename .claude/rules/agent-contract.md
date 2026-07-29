@@ -1,14 +1,14 @@
 ---
 paths:
-  - "*/agent.yaml"
-  - "*/agent_main.py"
-  - "*/src/**/agentcall.py"
-  - "_template/**"
+  - "**/agent.yaml"
+  - "**/agent_main.py"
+  - "**/agentcall.py"
+  - "agents/_template/**"
 ---
 
 # Editing an agent
 
-Full contract in `AGENT_PROTOCOL.md`. These are the parts broken by accident.
+Full contract in `docs/AGENT_PROTOCOL.md`. These are the parts broken by accident.
 
 **stdout carries the envelope and nothing else.** Point `sys.stdout` at stderr
 before any work, and write the envelope to the real stdout captured first.

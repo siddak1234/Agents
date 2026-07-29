@@ -45,9 +45,22 @@ class Registry:
         return len(self.agents)
 
 
-#: The scaffold every agent starts as. Not an agent itself — see the leading
-#: underscore convention in CLAUDE.md.
-TEMPLATE_DIR = "_template"
+#: Where agents live. Tenant space: one folder per agent, nothing else. The
+#: registry could in principle point anywhere — discovery is by declaration —
+#: but this repository's layout rule is that it points here, and
+#: `integration_problems` reports a registered agent that is not.
+AGENTS_DIR = "agents"
+
+#: The template's own name, as written inside its `agent.yaml` and
+#: `agent_main.py`. Distinct from its path below: the scaffolder rewrites the
+#: name and copies the path, and conflating the two renamed a new agent to
+#: `agents/_template`.
+TEMPLATE_NAME = "_template"
+
+#: The scaffold every agent starts as, beside the real agents so `agents/` is
+#: the one place to look. Not an agent itself: the leading underscore is what
+#: keeps discovery from ever making it callable (see CLAUDE.md).
+TEMPLATE_DIR = f"{AGENTS_DIR}/{TEMPLATE_NAME}"
 
 #: Marks each spot the template expects a new agent to change.
 TODO_MARKER = "TODO(new agent)"
@@ -66,7 +79,8 @@ def integration_problems(registry: Registry) -> list[str]:
     """
     problems = [
         f"{name}/ holds an agent.yaml but is not in registry.yaml. "
-        f"Add `- path: {name}` there, or the agent is never callable."
+        f"Add `- path: {AGENTS_DIR}/{name}` there (and put the folder under "
+        f"{AGENTS_DIR}/ if it is not already), or the agent is never callable."
         for name in unregistered_agent_dirs(registry)
     ]
 
@@ -75,11 +89,24 @@ def integration_problems(registry: Registry) -> list[str]:
     readme_text = readme.read_text(encoding="utf-8") if readme.is_file() else ""
 
     for manifest in registry:
-        where = f"{manifest.name}/agent.yaml"
+        where = f"{manifest.workdir.name}/agent.yaml"
+
+        # The layout rule, enforced where every other integration rule is. A
+        # registered path outside agents/ loads fine — discovery is by
+        # declaration — but it puts tenant code in platform space, and ten
+        # interns following the previous agent's example is how a root fills
+        # up. The registry says where an agent is; this says where it belongs.
+        if manifest.workdir.parent != registry.root / AGENTS_DIR:
+            problems.append(
+                f"{manifest.name}: registered at "
+                f"'{manifest.workdir.relative_to(registry.root)}', outside "
+                f"{AGENTS_DIR}/. Agents live in {AGENTS_DIR}/<name> — move the "
+                f"folder and update its registry.yaml entry."
+            )
 
         problems.extend(
             f"{manifest.name}: no {required}. Every agent documents and "
-            f"licenses itself — see CONTRIBUTING.md."
+            f"licenses itself — see docs/CONTRIBUTING.md."
             for required in ("README.md", "LICENSE")
             if not (manifest.workdir / required).is_file()
         )
@@ -104,6 +131,15 @@ def integration_problems(registry: Registry) -> list[str]:
                 f"{manifest.name}: still has `{TODO_MARKER}` markers in "
                 f"{', '.join(marked)}. Work through them, then delete the comment."
             )
+
+        problems.extend(
+            f"{manifest.name}: {unwanted} is not a file an agent may ship. "
+            f"An agent is source, tests and its manifest — see "
+            f"{TEMPLATE_DIR}/ for the whole of what one needs. If yours "
+            f"genuinely requires this, say why in the pull request rather "
+            f"than widening the list."
+            for unwanted in _unallowed_files(manifest.workdir)
+        )
 
         problems.extend(
             f"{where}: capability '{capability.name}' declares no {field}. "
@@ -172,6 +208,58 @@ MAX_SCANNED_BYTES = 1024 * 1024
 #: as the contributor's own. Exact-match comparison was defeated by editing one
 #: character, which is not the same as writing a description.
 MAX_TEMPLATE_SIMILARITY = 0.8
+
+
+#: What an agent folder may contain. An allowlist rather than a list of banned
+#: things: the banned list is infinite and the allowed one is short, so the
+#: allowlist is both smaller and closed — a file type nobody anticipated is
+#: refused instead of admitted.
+#:
+#: It doubles as the mechanical half of the shape rule. `docker-compose.yml`,
+#: `Dockerfile`, `alembic.ini`, `.env`, an archive or a stray `.sql` dump all
+#: fail on their extension alone, so "an agent is not a service" stops being a
+#: reviewer's opinion. Note `.yaml` is NOT allowed generally — only the two
+#: yaml files an agent legitimately owns are named below, because admitting
+#: arbitrary yaml is exactly how a compose file walks in.
+ALLOWED_SUFFIXES = frozenset({".py", ".md", ".toml", ".json", ".lock", ".txt", ".example"})
+
+ALLOWED_NAMES = frozenset(
+    {
+        MANIFEST_NAME,
+        ".pre-commit-config.yaml",
+        ".gitignore",
+        ".python-version",
+        "LICENSE",
+        "Makefile",
+    }
+)
+
+#: Directories that make an agent a service no matter what is inside them. The
+#: allowlist alone cannot catch these: a migrations folder is full of ordinary
+#: `.py` files and would sail through on extension.
+DENIED_DIRS = frozenset({"alembic", "migrations"})
+
+
+def _unallowed_files(workdir: Path) -> list[str]:
+    """Committed paths under `workdir` an agent has no business shipping."""
+    found = []
+    for path in sorted(workdir.rglob("*")):
+        rel = path.relative_to(workdir)
+        parts = set(rel.parts)
+        # Build output and caches are ignored, not rejected: they are not
+        # committed, and failing someone's build because they ran pytest once
+        # would be indefensible.
+        if SKIP_DIRS & parts:
+            continue
+        if denied := DENIED_DIRS & parts:
+            found.append(f"{sorted(denied)[0]}/")
+            continue
+        if not path.is_file():
+            continue
+        if path.name in ALLOWED_NAMES or path.suffix in ALLOWED_SUFFIXES:
+            continue
+        found.append(str(rel))
+    return sorted(set(found))
 
 
 def _files_with_marker(workdir: Path) -> list[str]:
@@ -258,21 +346,32 @@ def _template_manifest(root: Path) -> AgentManifest | None:
 def unregistered_agent_dirs(registry: Registry) -> list[str]:
     """Folders that look like an agent but are not in the registry.
 
-    Almost always a half-finished integration: someone copied `_template`,
-    wrote their agent, and forgot step 4. Nothing else notices — discovery
-    ignores unregistered folders by design — so the agent would merge and
-    simply never be callable.
+    Almost always a half-finished integration: someone scaffolded their
+    agent, wrote it, and forgot to register it. Nothing else notices —
+    discovery ignores unregistered folders by design — so the agent would
+    merge and simply never be callable.
+
+    Both `agents/` and the repository root are scanned: the first is where
+    agents belong, the second is where an old habit or a copied tutorial
+    puts them. A stray at the root gets the same report and the layout
+    check above tells the registered ones to move, so between the two every
+    misplacement has a message.
 
     A leading underscore means "not an agent" (`_template` is the working
     example nobody should be able to invoke), so those are skipped.
     """
+    candidates: list[Path] = []
+    for parent in (registry.root / AGENTS_DIR, registry.root):
+        if parent.is_dir():
+            candidates.extend(parent.iterdir())
+    registered_dirs = {manifest.workdir for manifest in registry}
     return sorted(
         path.name
-        for path in registry.root.iterdir()
+        for path in candidates
         if path.is_dir()
         and not path.name.startswith((".", "_"))
         and (path / MANIFEST_NAME).is_file()
-        and path.name not in registry.agents
+        and path.resolve() not in registered_dirs
     )
 
 

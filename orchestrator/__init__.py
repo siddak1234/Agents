@@ -1,7 +1,7 @@
 """The agent orchestrator.
 
 Discovers the agents declared in `registry.yaml` and calls them over the
-`agentcall/v1` contract (see AGENT_PROTOCOL.md).
+`agentcall/v1` contract (see docs/AGENT_PROTOCOL.md).
 
 This package never imports agent code. Every call crosses a process
 boundary, so each agent keeps its own dependency set and its own working

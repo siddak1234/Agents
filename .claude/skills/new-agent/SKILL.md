@@ -51,7 +51,7 @@ blocking finding later.
 8. **What machinery does it need?** If the honest answer includes a web
    server, a database it owns, Docker, or a worker queue, stop the interview
    there: that is a service, not an agent, and the board blocks service
-   shape (CONTRIBUTING.md, "How big is an agent?"). Help them find the
+   shape (docs/CONTRIBUTING.md, "How big is an agent?"). Help them find the
    agent-sized core — the capability a caller actually invokes — and say
    plainly that the rest belongs in its own repository.
 
@@ -92,7 +92,7 @@ Then work through every `TODO(new agent)` marker using the interview answers:
 uv run agents list --strict
 uv run agents check <agent-name>
 uv run agents call <agent-name> <capability> --input '{...}'
-cd <agent-name> && python3 -m unittest discover -s tests
+cd agents/<agent-name> && python3 -m unittest discover -s tests
 ```
 
 `--strict` is the honest one — it fails while the agent is still a renamed
@@ -103,7 +103,7 @@ success on a green `agents check` alone; that only proves the agent runs.
 
 Tell them what to do next, in this order: implement the capability bodies,
 extend the tests, then `/raise-pr`. Name the reviewers they will meet and what
-each will ask — `CONTRIBUTING.md` has the table.
+each will ask — `docs/CONTRIBUTING.md` has the table.
 
 Do not run `/raise-pr` yourself. The contributor should have built and tested
 the thing before it is reviewed.

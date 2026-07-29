@@ -33,6 +33,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `agents scope` diffs against the base; a shallow clone has no
+          # merge base to diff from and the check would skip itself.
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
@@ -42,6 +46,43 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Sync
         run: uv sync --frozen
+
+      # pre-commit builds a virtualenv per hook repo, and this config pins
+      # `python3.13`. gitleaks is a Go hook so it never needed one, which is
+      # why the secret scan worked here for weeks and the first python hook
+      # added below did not: virtualenv could not discover an interpreter by
+      # that spec. uv's own interpreter is not on PATH under that name.
+      - name: Python for pre-commit's hook environments
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Cheapest gate, so it runs first: did this branch change only what an
+      # agent change may? A stray edit to shared code inside a new-agent pull
+      # request is the thing review is least likely to catch, and finding out
+      # before the build runs is the point.
+      # Enforced for everyone except the repository owner. The rule exists to
+      # stop a contributor's agent pull request carrying a stray edit to
+      # shared code; the owner is not that threat model, and is the one who
+      # has to land migrations that legitimately move agents and platform
+      # together. The check still RUNS for the owner and still prints — it
+      # just does not fail the build, so a genuine mistake is still visible.
+      - name: Scope
+        run: |
+          if uv run agents scope --base "origin/${{ github.base_ref || 'main' }}"; then
+            exit 0
+          fi
+          if [ "${{ github.event.pull_request.author_association }}" = "OWNER" ]; then
+            echo "::warning::Scope check failed, but the author owns this repository, so it is reported rather than enforced. If this is not a migration, split the pull request."
+            exit 0
+          fi
+          exit 1
+
+      # A 50 MB commit passed CI until this line: check-added-large-files was
+      # pinned in the pre-commit config but only ever ran locally, so anyone
+      # who never installed the hooks — every fork contributor — bypassed it.
+      - name: Reject oversized files
+        run: uv run pre-commit run check-added-large-files --all-files
 
       # Secret scanning, same pin as the pre-commit hook. It ran locally on
       # every commit and in CI on none — which meant `--no-verify`, a
@@ -55,9 +96,9 @@ jobs:
       # Root-owned code only. Agent folders lint themselves with their own
       # config, in their own workflow.
       - name: Ruff format check
-        run: uv run ruff format --check orchestrator tests _template
+        run: uv run ruff format --check orchestrator agents/_template
       - name: Ruff lint
-        run: uv run ruff check orchestrator tests _template
+        run: uv run ruff check orchestrator agents/_template
       - name: Mypy (strict)
         run: uv run mypy orchestrator
 
@@ -129,12 +170,13 @@ jobs:
           fi
 
           # Otherwise: only agents whose own folder changed, and only those
-          # actually in the registry. An unregistered folder is not an agent,
-          # so `_template` never reaches this list.
+          # actually in the registry. Agents live under agents/<name>, so the
+          # name is the second path segment. An unregistered folder is not an
+          # agent, so `_template` never reaches this list.
           registered=$(uv run agents list --json |
             uv run python -c 'import json,sys; print(" ".join(a["name"] for a in json.load(sys.stdin)))')
           scoped=""
-          for dir in $(echo "$changed" | cut -d/ -f1 | sort -u); do
+          for dir in $(echo "$changed" | grep '^agents/' | cut -d/ -f2 | sort -u); do
             case " $registered " in *" $dir "*) scoped="$scoped $dir" ;; esac
           done
           scoped=$(echo "$scoped" | xargs || true)
@@ -162,9 +204,9 @@ jobs:
           # synced in its own folder, and one with no dependencies needs
           # nothing done to it.
           for a in $agents; do
-            if [ -f "$a/pyproject.toml" ]; then
-              echo "::group::uv sync $a"
-              (cd "$a" && uv sync --frozen)
+            if [ -f "agents/$a/pyproject.toml" ]; then
+              echo "::group::uv sync agents/$a"
+              (cd "agents/$a" && uv sync --frozen)
               echo "::endgroup::"
             fi
           done

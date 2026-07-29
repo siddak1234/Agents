@@ -4,35 +4,37 @@ A repository of independent agents and one orchestrator that calls them.
 
 An agent here is something you **call**, not something you boot: one JSON
 request in, one structured result out, with cost attached. The contract is
-[`AGENT_PROTOCOL.md`](./AGENT_PROTOCOL.md) and it is the only thing the
+[`docs/AGENT_PROTOCOL.md`](./docs/AGENT_PROTOCOL.md) and it is the only thing the
 orchestrator knows about any agent.
 
 ## Layout
 
+Three folders, and building an agent needs only two of them:
+
 ```
-.
-├── AGENT_PROTOCOL.md   the contract — read this first
-├── CONTRIBUTING.md     how to add your own agent
-├── _template/          a working agent to copy. Start here.
-├── orchestrator/       discovery, manifests, transport, CLI
-├── tests/              contract and template tests
-├── .claude/            skills, rules, hooks, reviewers, /raise-pr
-├── docs/               roadmap and deeper notes
-├── registry.yaml       which agents exist (paths only)
-└── <agent-name>/       one folder per agent, each with its own agent.yaml
+agents/              every agent, one folder each — yours goes here
+  _template/           a working agent to copy. Start here.
+  realty-lead-gen/     a worked reference
+docs/                the contract, how to contribute, the intern brief
+orchestrator/        the platform that calls agents, and its own tests
 ```
+
+Plus `registry.yaml` (which agents exist — paths only) and `.claude/`
+(editor guidance). Everything else at the root is there because a tool
+insists on finding it there: `pyproject.toml`, `uv.lock`,
+`.pre-commit-config.yaml`, `.gitignore`.
 
 ## Agents
 
 | Agent | Status | Capabilities |
 |---|---|---|
-| [`realty-lead-gen`](./realty-lead-gen) | active | `grade_photos` |
+| [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
 
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered
 agent has no row here — it cannot catch a stale Status cell, so treat that
-column as prose, not telemetry. The machine-readable list is
-`uv run agents list`.
+column as prose, not telemetry. For machine-readable output — which is what
+CI reads to work out its scope — use `uv run agents list --json`.
 
 ## Calling an agent
 
@@ -46,6 +48,7 @@ uv run agents test                            # run each agent's own tests
 uv run agents lint                            # run each agent's own lint
 uv run agents new <name>                      # scaffold one from the template
 uv run agents verify                          # every deterministic gate CI runs
+uv run agents scope --base origin/main        # …except this one: it needs a base
 ```
 
 Every call runs the agent as a subprocess **in its own folder, with its own
@@ -56,17 +59,19 @@ credentials it never declared.
 ## Adding an agent
 
 `uv run agents new my-agent`, then follow
-[`CONTRIBUTING.md`](./CONTRIBUTING.md). Building from claude.ai chat instead
+[`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md). Building from claude.ai chat instead
 of Claude Code? [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the
 self-contained version — paste it into a chat and it carries the whole
-contract with it. Two examples exist on purpose: `_template/` is the
-skeleton, `realty-lead-gen/` is a worked reference with real dependencies, a
-database, and its own CI.
+contract with it. Two examples exist on purpose: `agents/_template/` is
+the skeleton, `agents/realty-lead-gen/` is a worked reference that calls a
+model —
+structured output, graceful degradation, its own locked dependencies.
 
 ## Development
 
 ```bash
 uv run agents verify        # every deterministic gate CI runs, in one command
+uv run agents scope --base origin/main   # the one it cannot: your branch vs main
 uv run pre-commit install   # optional: most of the same gates, per commit
 ```
 
@@ -83,13 +88,13 @@ applies to dependencies.
 ## CI
 
 Workflows live in `.github/workflows/` at the root, because GitHub Actions
-does not discover workflows nested inside a directory. Each agent's pipeline
-is scoped with a `paths:` filter.
+does not discover workflows nested inside a directory. Both run on every pull
+request; the per-agent work inside them is scoped at runtime by diffing
+against the base, not by a `paths:` filter.
 
 | Workflow | Runs on | Gate |
 |---|---|---|
 | `orchestrator.yml` | every change | secret scan, ruff, strict mypy, registry validation, contract and template tests; then, per agent in scope: `agents check`, `agents lint`, `agents test` |
-| `realty-lead-gen.yml` | `realty-lead-gen/**` | ruff, mypy, unit tests, integration against real Postgres and Redis, coverage gate |
 | `review.yml` | pull requests | the deterministic gates, then the review board — four reviewers reading the diff. Authenticates with `CLAUDE_CODE_OAUTH_TOKEN` (your Claude subscription, via `claude setup-token`) or `ANTHROPIC_API_KEY`; warns and skips with neither. Advisory until it is required in branch protection — and fork pull requests never receive secrets, so on a fork the board cannot run at all and a human reads the diff |
 
 `agents check` calls `describe` on an agent — no network, no cost, and the
@@ -123,14 +128,15 @@ built yet.
 
 ## How the repository guides you
 
-Four mechanisms, each doing what only it can:
+Five mechanisms, each doing what only it can:
 
 | | Does |
 |---|---|
-| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding; `/raise-pr` runs the gates, then the board, then opens the PR |
+| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding, so the purpose exists before the folder does |
+| **Commands** (`.claude/commands/`) | `/raise-pr` runs the gates, then the board, then opens the PR — user-invoked only, which is what raising a PR should be |
 | **Rules** (`.claude/rules/`) | Load automatically when you edit a manifest, an entrypoint, or shared code — contract reminders at the moment they apply |
 | **Hooks** (`.claude/settings.json`) | Edit a manifest and the integration gate runs; a half-finished agent is reported before you get further |
-| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify` — the same commands CI runs |
+| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify`, `scope` — the same commands CI runs |
 
 Rules guide, hooks enforce. A rule is context you may act on; a hook exits
 non-zero and has to be dealt with.
@@ -138,5 +144,5 @@ non-zero and has to be dealt with.
 ## Licensing
 
 No repository-wide license. Each agent folder carries its own;
-`realty-lead-gen/LICENSE` is proprietary. A new agent should ship an explicit
+`agents/realty-lead-gen/LICENSE` is proprietary. A new agent should ship an explicit
 `LICENSE` rather than inherit an assumption.
