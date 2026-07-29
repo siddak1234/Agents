@@ -128,14 +128,15 @@ built yet.
 
 ## How the repository guides you
 
-Four mechanisms, each doing what only it can:
+Five mechanisms, each doing what only it can:
 
 | | Does |
 |---|---|
-| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding; `/raise-pr` runs the gates, then the board, then opens the PR |
+| **Skills** (`.claude/skills/`) | `/new-agent` interviews you before scaffolding, so the purpose exists before the folder does |
+| **Commands** (`.claude/commands/`) | `/raise-pr` runs the gates, then the board, then opens the PR — user-invoked only, which is what raising a PR should be |
 | **Rules** (`.claude/rules/`) | Load automatically when you edit a manifest, an entrypoint, or shared code — contract reminders at the moment they apply |
 | **Hooks** (`.claude/settings.json`) | Edit a manifest and the integration gate runs; a half-finished agent is reported before you get further |
-| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify` — the same commands CI runs |
+| **Tools** (`agents` CLI) | `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify`, `scope` — the same commands CI runs |
 
 Rules guide, hooks enforce. A rule is context you may act on; a hook exits
 non-zero and has to be dealt with.

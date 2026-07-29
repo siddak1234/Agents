@@ -33,7 +33,7 @@ serve, and one stage of it is empty.
 | 1.1 | Interview-driven scaffolding — *why does this agent exist, what is its distinct purpose, what capabilities* — writing the answers into `agent.yaml` | ✅ `/new-agent` interviews before it scaffolds, and refuses |
 | 1.2 | `_template` a copyable working agent with starter tests | ✅ |
 | 1.3 | Integration completeness — a renamed template is rejected | ✅ |
-| 1.4 | `/raise-pr` — gates, then board, then PR or denial | ✅ now a skill under `.claude/skills/`, and executed |
+| 1.4 | `/raise-pr` — gates, then board, then PR or denial | ✅ a command under `.claude/commands/`, and executed. Command rather than skill because where the two names collide the skill wins, so shipping both would mean two copies of one procedure — and raising a pull request should be user-invoked, never something Claude decides to do |
 | 1.5 | Review board — four reviewers, one lens each | ✅ executed twice; blocked the bad agent, passed the good one |
 | 1.6 | CI review gate on the pull request | 🟡 needs secret + branch protection |
 | 1.7 | First end-to-end run against a deliberately bad agent | ✅ 10 blocking findings across three reviewers |
