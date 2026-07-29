@@ -156,15 +156,22 @@ uv run agents verify
 Run this whenever you want to know where you stand. It runs every
 deterministic check CI runs and prints all of them at once. **It will fail at
 first, and the list it prints is your to-do list.** When it prints
-`All 9 gates pass`, you are done. If it instead reports that some gates *did
+`All 10 gates pass`, you are done. If it instead reports that some gates *did
 not run*, that is not a pass — a tool or `.git` is missing locally, and CI
-will still run them. (CI has exactly one check beyond these — a model-driven
-review board — and it needs a token the repository owner configures.)
+will still run them.
 
-The nine, so you know what is being asked of you:
+Two CI checks are outside this command, and it prints a reminder of the one
+you can act on. `agents scope` compares your branch against `main`, which
+needs a base this command has no way to guess — run
+`uv run agents scope --base origin/main` before you push. The other is the
+model-driven review board, which needs a token the repository owner
+configures.
+
+The ten, so you know what is being asked of you:
 
 | Gate | Asks |
 |---|---|
+| `large files` | Is anything committed over 512 KB? An agent is source, not data. |
 | `secret scan` | Did a credential end up in a committed file? (gitleaks) |
 | `ruff format` | Is repository-owned code formatted? |
 | `ruff check` | Is it lint-clean? |
@@ -175,11 +182,11 @@ The nine, so you know what is being asked of you:
 | `agents lint` | Does your own declared lint command pass? Root tooling does not check your code. |
 | `agents test` | Does your own declared test command pass, from your folder? |
 
-The last four are about your agent. The first five are about the repository,
+The last four are about your agent. The first six are about the repository,
 and should already pass — if one of them breaks, you changed something
-outside your folder (the secret scan being the exception worth respecting:
-it fails on *your* committed credential, and fixing it means removing the
-secret, never editing the scanner).
+outside your folder (the secret scan and the large-file cap being the
+exceptions worth respecting: both fail on what *you* committed, and fixing
+them means removing the file, never editing the scanner).
 
 If you get stuck, paste the whole `verify` output into Claude along with this
 page — the errors name the file and the fix.

@@ -98,7 +98,11 @@ rather than a copy, and `--strict` reporting them is the integration.
 
    ```bash
    uv run agents verify           # every deterministic gate CI runs, at once
+   uv run agents scope --base origin/main   # the one it cannot run for you
    ```
+
+   `verify` checks the working tree; `scope` checks your branch against the
+   base, which is why it takes one and `verify` does not run it. CI runs both.
 
    Or individually, when you want one answer rather than all of them:
 

@@ -87,11 +87,25 @@ what CI does.
 uv run agents verify
 ```
 
-One command, running every deterministic gate CI runs — including the format
-check and the secret scan that hand-maintained lists of "the gates" kept
-forgetting. `agents verify` is the contributor-facing definition of the
-gates; the CI workflows run the same set as their own steps, and a gate added
-to one belongs in both.
+One command, running every deterministic gate CI runs against the working
+tree — including the format check, the secret scan and the large-file cap
+that hand-maintained lists of "the gates" kept forgetting. `agents verify` is
+the contributor-facing definition of the gates; the CI workflows run the same
+set as their own steps, and a gate added to one belongs in both.
+
+That last sentence is now a test rather than an aspiration. It was untrue
+twice — gitleaks, then `check-added-large-files`, each added to CI and not to
+`verify`, each leaving a window where a branch printed "all gates pass" and
+went red anyway. `orchestrator/tests/test_verify.py` reads the workflow and
+fails if a gate is in one and not the other.
+
+One gate is deliberately outside `verify` and declared as such in
+`_NOT_COVERED`: `agents scope` reads a *diff*, so it needs a base branch a
+local checkout may not have, and CI enforces it by author. Run it yourself:
+
+```bash
+uv run agents scope --base origin/main
+```
 
 `agents describe <agent>` against `agents describe <agent> --static` shows
 whether a manifest has drifted from its code — the first runs the agent, the

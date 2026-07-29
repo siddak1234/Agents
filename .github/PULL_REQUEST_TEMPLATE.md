@@ -8,10 +8,13 @@ Delete the section that does not apply.
 
 ### Adding or changing an agent
 
-- [ ] `uv run agents verify` prints `All 9 gates pass` — every deterministic
-      gate CI runs, including the secret scan and your agent's own declared
-      `runtime.lint` and `runtime.test` commands. (The review board in CI is
-      the one check beyond these, and it needs a configured token.)
+- [ ] `uv run agents verify` prints `All 10 gates pass` — every deterministic
+      gate CI runs on the working tree, including the secret scan and your
+      agent's own declared `runtime.lint` and `runtime.test` commands
+- [ ] `uv run agents scope --base origin/main` passes — the one deterministic
+      gate `verify` cannot run for you, because it compares against a base.
+      (The review board is the only other CI check, and it needs a token the
+      repository owner configures.)
 - [ ] Folder name, `name:` in `agent.yaml`, and `AGENT_NAME` all match
 - [ ] Description and capabilities are this agent's, not the template's
 - [ ] No `TODO(new agent)` markers left anywhere in the folder — the gate

@@ -48,6 +48,7 @@ uv run agents test                            # run each agent's own tests
 uv run agents lint                            # run each agent's own lint
 uv run agents new <name>                      # scaffold one from the template
 uv run agents verify                          # every deterministic gate CI runs
+uv run agents scope --base origin/main        # …except this one: it needs a base
 ```
 
 Every call runs the agent as a subprocess **in its own folder, with its own
@@ -70,6 +71,7 @@ structured output, graceful degradation, its own locked dependencies.
 
 ```bash
 uv run agents verify        # every deterministic gate CI runs, in one command
+uv run agents scope --base origin/main   # the one it cannot: your branch vs main
 uv run pre-commit install   # optional: most of the same gates, per commit
 ```
 

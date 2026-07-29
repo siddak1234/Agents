@@ -52,7 +52,7 @@ nobody reopens. Each mechanism below does what only it can.
 | 2.2 | Contract rules that load when editing a manifest or entrypoint | `.claude/rules/` with `paths:` | ✅ two rules, both path-scoped |
 | 2.3 | Manifest edited → integration check runs and reports | `PostToolUse` hook | ✅ exit 2 on a broken manifest, silent otherwise |
 | 2.4 | Committed team settings so guidance applies to every clone | `.claude/settings.json` | ✅ |
-| 2.5 | The `agents` CLI as the contributor's tool — `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify` | tool | ✅ |
+| 2.5 | The `agents` CLI as the contributor's tool — `list`, `describe`, `call`, `check`, `test`, `lint`, `new`, `verify`, `scope` | tool | ✅ |
 | 2.6 | Reference material loaded on demand rather than always | skill supporting files | ⬜ |
 
 **Rules guide, hooks enforce.** A rule is context; a hook exits non-zero. Use
