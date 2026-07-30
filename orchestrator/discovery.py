@@ -254,10 +254,14 @@ def _shippable_paths(workdir: Path) -> list[Path]:
     untracked ones git would include. Deliberately not `check-ignore`, which
     reports a force-added `.env` as ignored and would let a real committed
     secret through; a tracked file is listed here however it got tracked.
+
+    `-z` is not cosmetic. Without it git C-quotes any path outside plain ASCII
+    — `café.py` comes back as `"caf\\303\\251.py"` — and the allowlist would
+    then judge a mangled name instead of the real one.
     """
     try:
         completed = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],  # noqa: S607
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],  # noqa: S607
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -269,7 +273,7 @@ def _shippable_paths(workdir: Path) -> list[Path]:
     # should over-report rather than pass silently, so fall back to the tree.
     if completed is None or completed.returncode != 0:
         return [p.relative_to(workdir) for p in sorted(workdir.rglob("*"))]
-    return sorted(Path(line) for line in completed.stdout.splitlines() if line)
+    return sorted(Path(name) for name in completed.stdout.split("\0") if name)
 
 
 def _unallowed_files(workdir: Path) -> list[str]:

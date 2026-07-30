@@ -33,8 +33,11 @@ intern who had committed to `main` with a refusal and no way forward. Instead:
 git checkout -b <slug>
 ```
 
-where `<slug>` is four or five words from the pull request title, lowercase,
-hyphen-joined — `add-weather-forecast-agent`. Their commits come with them.
+Build `<slug>` from the title by a fixed transform, so the same title always
+gives the same branch: lowercase it, drop anything that is not a letter, digit
+or space, drop a leading `a`/`an`/`the`, keep the first four to five remaining
+words, join with hyphens. *"Add a Weather Forecast Agent (v2)"* →
+`add-weather-forecast-agent`. Their commits come with them.
 
 If they are already on a branch, **use it**. Do not create a second one; that
 orphans the work they have been doing.
@@ -70,9 +73,22 @@ too — there is nothing extra to remember.
 
 `scope` refuses a branch that changes shared code, including one that contains
 nothing else. That is the rule, not a bug to work around: shared code is a
-maintainer's to change. If this **is** a maintainer's platform branch, rerun it
-as `uv run agents scope --base origin/main --allow-platform` and say that you
-did — do not reach for the flag to get a contributor's branch through.
+maintainer's to change.
+
+**Never decide for yourself that a branch is platform work.** `--allow-platform`
+is the one instruction here you could rationalise your way into, and a branch of
+nothing but shared-code edits is exactly what both a maintainer's platform work
+and a contributor straying out of their folder look like from the diff. You
+cannot tell them apart by reading it. So ask, the same way you ask for a missing
+title:
+
+> This branch changes only shared code, which `agents scope` refuses. Are you a
+> maintainer raising this as deliberate platform work? If so I will rerun with
+> `--allow-platform`.
+
+Rerun with the flag **only** after they say yes, and say in your output that you
+did and that they authorised it. If they say no, stop — the fix is to move the
+work into `agents/<their-agent>/`, not to pass the flag.
 
 ### 3. The review board
 
@@ -107,8 +123,9 @@ gh pr create --title "<title>" --body "<body>"
 ```
 
 The push is not optional and not implied — `gh pr create` on a branch with no
-remote fails outright. If the push is rejected, say so plainly: that is
-write access or branch protection, not a fault in the branch.
+remote fails outright. If the push is rejected, say so plainly and **stop**:
+that is write access or branch protection, not a fault in the branch, and
+there is nothing to open a pull request against.
 
 If the branch already has an open pull request, `gh` refuses rather than
 opening a second one. That is not a failure either — the push above has
@@ -128,6 +145,11 @@ Ordered high to low severity, grouped by reviewer, each with its file, the
 problem and the suggestion. A comment is a review surface — it can be replied
 to and resolved — and a body cannot. This is the list the maintainer reads
 before opening the diff, so rank it honestly rather than padding it.
+
+If `gh pr comment` fails, print the findings in full to the terminal and say
+they did not post. The pull request is already open by then, so a swallowed
+error loses the entire review — the one output of this command nothing else
+reproduces.
 
 Finish by printing the pull request URL, and say plainly that merging waits on
 the maintainer's approval.

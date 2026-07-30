@@ -11,8 +11,8 @@ you want to know what an agent must do, read them.
 
 from __future__ import annotations
 
+import ast
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -90,12 +90,21 @@ def test_template_is_not_registered():
     assert "_template" not in load_registry().agents
 
 
-#: First name in an `import x.y` / `from x.y import z` line.
-_IMPORTED = re.compile(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)", re.M)
-
-
 def _top_level_imports(source: Path) -> set[str]:
-    return {m.split(".")[0] for m in _IMPORTED.findall(source.read_text(encoding="utf-8"))}
+    """Root module of every import in `source`.
+
+    Parsed, not matched. A line-based regex counts `import orchestrator`
+    written inside a docstring — this file's own prose says it twice — and a
+    boundary check that fires on prose is one people learn to ignore.
+    """
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return names
 
 
 def _sources(root: Path) -> list[Path]:

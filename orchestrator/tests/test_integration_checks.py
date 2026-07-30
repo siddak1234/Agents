@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from orchestrator import discovery
 from orchestrator.cli import main
 from orchestrator.discovery import (
     TEMPLATE_DIR,
@@ -367,6 +368,26 @@ def test_a_force_added_env_file_is_still_caught(tmp_path: Path) -> None:
 
     problems = "\n".join(integration_problems(load_registry(root)))
     assert ".env is not a file an agent may ship" in problems
+
+
+def test_the_scan_falls_back_to_the_tree_when_git_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No git binary must mean over-report, never a silent pass.
+
+    The not-a-repo path is covered incidentally by every other test here — none
+    of them `git init`. This is the other branch: git missing entirely, which
+    raises `FileNotFoundError` from `subprocess.run`.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    (agent / "dump.sql").write_text("select 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        discovery.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError)
+    )
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "dump.sql is not a file an agent may ship" in problems
 
 
 def test_the_allowlist_admits_everything_a_real_agent_needs(tmp_path: Path) -> None:
