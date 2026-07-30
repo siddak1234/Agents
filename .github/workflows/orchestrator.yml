@@ -2,8 +2,10 @@
 #
 # GitHub Actions only discovers workflows in `.github/workflows` at the
 # repository root. Anything nested inside an agent folder is never run, which
-# is why every agent's pipeline lives here behind a `paths:` filter rather
-# than in the agent's own folder.
+# is why every agent's pipeline lives here rather than in the agent's own
+# folder. There is no `paths:` filter: scope is worked out at runtime by the
+# `Determine scope` step below, which diffs against the base — a `paths:`
+# filter cannot tell "this agent changed" from "shared code changed".
 #
 # Two jobs:
 #

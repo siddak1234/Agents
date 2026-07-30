@@ -13,7 +13,8 @@ them.
 **The orchestrator never imports agent code, and no agent imports the
 orchestrator.** The first keeps one agent's dependencies from breaking
 everything else; the second keeps an agent working when extracted. Both
-directions are tested — if a change needs either, the change is wrong.
+directions are tested by `test_neither_side_imports_the_other` — if a change
+needs either, the change is wrong.
 
 **One runtime dependency: `pyyaml`.** Anything added here is paid for by every
 agent, forever. Reach for the standard library.

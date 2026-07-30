@@ -18,7 +18,7 @@ Two examples, deliberately at opposite ends:
 
 | | What it shows |
 |---|---|
-| [`_template/`](../agents/_template) | The skeleton. ~100 lines, standard library, runs with no install. **Start here.** |
+| [`_template/`](../agents/_template) | The skeleton. One entrypoint file, standard library, runs with no install. **Start here.** |
 | [`realty-lead-gen/`](../agents/realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
 
 Copy the template. Read the reference when you need to see how something is

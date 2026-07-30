@@ -12,15 +12,17 @@ you want to know what an agent must do, read them.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from orchestrator import manifest as manifest_mod
 from orchestrator.contract import PROTOCOL, CallRequest
-from orchestrator.discovery import TEMPLATE_DIR, load_registry, repo_root
+from orchestrator.discovery import AGENTS_DIR, SKIP_DIRS, TEMPLATE_DIR, load_registry, repo_root
 from orchestrator.runner import call, describe
 
 TEMPLATE = repo_root() / TEMPLATE_DIR
@@ -86,6 +88,55 @@ def test_runs_without_the_orchestrator(template):
 def test_template_is_not_registered():
     """Keeps `agents list` honest: a template is not an agent."""
     assert "_template" not in load_registry().agents
+
+
+#: First name in an `import x.y` / `from x.y import z` line.
+_IMPORTED = re.compile(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)", re.M)
+
+
+def _top_level_imports(source: Path) -> set[str]:
+    return {m.split(".")[0] for m in _IMPORTED.findall(source.read_text(encoding="utf-8"))}
+
+
+def _sources(root: Path) -> list[Path]:
+    return [p for p in root.rglob("*.py") if not SKIP_DIRS & set(p.relative_to(root).parts)]
+
+
+def test_neither_side_imports_the_other():
+    """The boundary CLAUDE.md calls load-bearing, checked rather than asserted.
+
+    Both facts held when this was written and neither was tested — the rule in
+    `.claude/rules/shared-code.md` said they were. The self-containment test
+    above does not cover it: it runs the template under the root interpreter,
+    where `orchestrator` is importable, so an agent that imported it would
+    still pass.
+
+    The second assertion looks redundant and is not. An orchestrator module
+    importing a real agent package raises `ModuleNotFoundError` at collection,
+    which is loud enough on its own — what this catches is the quiet version,
+    where the agent has been installed into the root environment and the
+    coupling therefore *works*.
+    """
+    root = repo_root()
+    agents_dir = root / AGENTS_DIR
+
+    offenders = [p for p in _sources(agents_dir) if "orchestrator" in _top_level_imports(p)]
+    assert not offenders, f"an agent imports the orchestrator: {offenders}"
+
+    # What an errant import would be spelled: an agent's top-level modules, and
+    # the packages under its src/. Standard-library names are removed — an
+    # agent shipping its own `json.py` would otherwise fail this for every
+    # orchestrator module that imports `json`, and the orchestrator resolves
+    # that name to the standard library regardless, the agent not being on its
+    # path.
+    agent_modules = (
+        {p.stem for d in agents_dir.iterdir() if d.is_dir() for p in d.glob("*.py")}
+        | {p.name for d in agents_dir.iterdir() if d.is_dir() for p in (d / "src").glob("*/")}
+    ) - set(sys.stdlib_module_names)
+    offenders = [
+        p for p in _sources(root / "orchestrator") if agent_modules & _top_level_imports(p)
+    ]
+    assert not offenders, f"the orchestrator imports agent code: {offenders}"
 
 
 def test_a_copy_becomes_a_real_agent(tmp_path):

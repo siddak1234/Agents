@@ -9,6 +9,7 @@ make something callable.
 from __future__ import annotations
 
 import re
+import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -240,11 +241,41 @@ ALLOWED_NAMES = frozenset(
 DENIED_DIRS = frozenset({"alembic", "migrations"})
 
 
+def _shippable_paths(workdir: Path) -> list[Path]:
+    """What a commit from `workdir` would actually carry, relative to it.
+
+    `rglob` answers "what is on disk", which is the wrong question. An agent
+    folder legitimately holds a developer's own `.env` — `realty-lead-gen`'s
+    README tells them to create one and its config reads it — and judging that
+    as shipped failed `agents verify` on a file git is configured never to
+    commit.
+
+    `ls-files --cached --others --exclude-standard` is tracked files plus the
+    untracked ones git would include. Deliberately not `check-ignore`, which
+    reports a force-added `.env` as ignored and would let a real committed
+    secret through; a tracked file is listed here however it got tracked.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],  # noqa: S607
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:  # no git on this machine
+        completed = None
+    # Outside a repository git exits 128. A check that cannot see the index
+    # should over-report rather than pass silently, so fall back to the tree.
+    if completed is None or completed.returncode != 0:
+        return [p.relative_to(workdir) for p in sorted(workdir.rglob("*"))]
+    return sorted(Path(line) for line in completed.stdout.splitlines() if line)
+
+
 def _unallowed_files(workdir: Path) -> list[str]:
-    """Committed paths under `workdir` an agent has no business shipping."""
+    """Shippable paths under `workdir` an agent has no business shipping."""
     found = []
-    for path in sorted(workdir.rglob("*")):
-        rel = path.relative_to(workdir)
+    for rel in _shippable_paths(workdir):
         parts = set(rel.parts)
         # Build output and caches are ignored, not rejected: they are not
         # committed, and failing someone's build because they ran pytest once
@@ -254,9 +285,9 @@ def _unallowed_files(workdir: Path) -> list[str]:
         if denied := DENIED_DIRS & parts:
             found.append(f"{sorted(denied)[0]}/")
             continue
-        if not path.is_file():
+        if not (workdir / rel).is_file():
             continue
-        if path.name in ALLOWED_NAMES or path.suffix in ALLOWED_SUFFIXES:
+        if rel.name in ALLOWED_NAMES or rel.suffix in ALLOWED_SUFFIXES:
             continue
         found.append(str(rel))
     return sorted(set(found))

@@ -117,7 +117,7 @@ second only reads YAML.
 agents/        every agent, one folder each (+ _template to copy)
 docs/          the contract, how to contribute, the intern brief, roadmap
 orchestrator/  the platform: discovery, manifests, transport, CLI, its tests
-.claude/       skills, rules, hooks, reviewers
+.claude/       skills, commands, rules, hooks, reviewers
 ```
 
 Everything left at the root is there because a tool requires it —
