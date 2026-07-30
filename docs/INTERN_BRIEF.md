@@ -489,7 +489,11 @@ capabilities:
         protocol: { type: string }
         capabilities: { type: array, items: { type: object } }
 
-  - name: your_capability
+  # `greet` is the skeleton's example capability, named identically here on
+  # purpose: these two files are the pair `agents check` compares. Rename it in
+  # both, together, or that check fails — which is the one mismatch this page
+  # warns about and the easiest to create by copying.
+  - name: greet
     description: >-
       What it does, what it costs, and how it fails. Someone choosing between
       agents reads this.
