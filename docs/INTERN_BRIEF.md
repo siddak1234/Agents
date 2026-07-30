@@ -225,6 +225,10 @@ git push -u origin my-agent
 Then open the pull request on GitHub. CI runs the same gates. Fill in the
 checklist in the PR template.
 
+You cannot merge it yourself, and you cannot push to `main` — `main` is
+protected and every change needs the maintainer's approving review. Expect to
+revise: that is the process working, not you failing it.
+
 ---
 
 ## Part 6 — The contract (this is the part to paste into Claude)

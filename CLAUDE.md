@@ -107,6 +107,18 @@ local checkout may not have, and CI enforces it by author. Run it yourself:
 uv run agents scope --base origin/main
 ```
 
+It refuses a branch that changes shared code — including one that changes
+nothing else, which is what most work in this repository is. Platform work
+declares itself and is allowed:
+
+```bash
+uv run agents scope --base origin/main --allow-platform
+```
+
+The flag is inert the moment an agent folder is touched, so it cannot land an
+agent and a platform edit together. Never reach for it to get a contributor's
+branch through.
+
 `agents describe <agent>` against `agents describe <agent> --static` shows
 whether a manifest has drifted from its code — the first runs the agent, the
 second only reads YAML.

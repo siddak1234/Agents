@@ -193,9 +193,14 @@ findings with the file and the fix.
 there is nothing to configure and no key involved.
 
 The same four reviewers run again in CI on the pull request. That run becomes
-the gate only once the repository owner configures two things: a
-`CLAUDE_CODE_OAUTH_TOKEN` secret so the board can authenticate, and branch
-protection requiring the **review board** check. Until then it is advisory —
+the gate once the repository owner configures the last of it. `main` is now
+protected — a pull request, one approving review, and review from the code
+owner are all required, and the deterministic checks must pass. The **review
+board** is deliberately *not* a required check yet: without a
+`CLAUDE_CODE_OAUTH_TOKEN` secret the board skips itself and its job still
+succeeds, so requiring it today would be a green tick over a review that never
+ran. The secret comes first; the check is added after. Until then it is
+advisory —
 and on a fork pull request it cannot run at all, because GitHub withholds
 secrets from forks; a human reads those diffs. `/raise-pr` is the fast path —
 a minute instead of a push-and-wait — not the gate.
