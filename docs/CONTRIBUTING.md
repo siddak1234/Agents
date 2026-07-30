@@ -163,11 +163,21 @@ your diff for, which is why a reviewer's finding on them is blocking.
 ## Opening the PR
 
 Small and complete beats large and staged. **One agent per PR, and nothing
-outside it** — `agents scope` enforces both. A branch that adds an agent may
-touch only `agents/<your-agent>/`, `registry.yaml`, `README.md` and `docs/`.
-Anything else fails, including a file your editor reformatted on save. If you
-genuinely need to change shared code, raise that as its own pull request:
-then it is reviewed as a change to *every* agent, which is what it is.
+outside it** — `agents scope` enforces both. A branch may touch only
+`agents/<your-agent>/`, `registry.yaml`, `README.md` and `docs/`. Anything
+else fails, including a file your editor reformatted on save.
+
+That holds whether or not your branch contains an agent. A branch that is
+*only* shared-code edits is refused too — it used to pass unread, which meant
+the guard caught a stray platform edit hidden inside an agent pull request and
+waved through a pull request that was nothing but platform edits. Shared code
+is not a contributor's to change: it is depended on by every agent, so a
+maintainer raises it separately and it is reviewed as a change to all of them.
+Need something from the platform? Say so in your pull request.
+
+Maintainers declare that work with `agents scope --allow-platform`. It only
+covers a branch with no agent in it, so it cannot be used to land an agent and
+a platform edit together.
 
 ```
 /raise-pr Add weather-agent

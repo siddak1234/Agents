@@ -51,10 +51,10 @@ def _add(repo: Path, path: str, text: str = "x\n") -> None:
     target.write_text(text, encoding="utf-8")
 
 
-def _commit_and_scope(repo: Path) -> int:
+def _commit_and_scope(repo: Path, *flags: str) -> int:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "work")
-    return main(["--root", str(repo), "scope", "--base", "main"])
+    return main(["--root", str(repo), "scope", "--base", "main", *flags])
 
 
 def test_one_agent_plus_registry_readme_and_docs_is_allowed(repo: Path) -> None:
@@ -98,16 +98,67 @@ def test_the_blueprint_is_platform_work_not_an_agent(repo: Path) -> None:
     it is what keeps the template out of `agents list` — and it has to mean
     the same here, or every platform change that improves the blueprint is
     refused as a stray agent edit.
+
+    `--allow-platform` is what pins that now. Were `_template` counted as an
+    agent, the flag would not apply (it only covers a branch with no agent in
+    it) and `orchestrator/runner.py` would be reported as a stray — so a pass
+    here is the underscore rule holding, not the flag papering over it.
     """
     _add(repo, "agents/_template/agent_main.py", "x\n# a better blueprint\n")
     _add(repo, "orchestrator/runner.py", "x\n# and the platform change it serves\n")
 
-    assert _commit_and_scope(repo) == 0
+    assert _commit_and_scope(repo, "--allow-platform") == 0
 
 
-def test_a_platform_only_branch_is_not_this_commands_business(repo: Path) -> None:
-    """Platform work is legitimate and reviewed on its own terms."""
+def test_a_platform_only_branch_is_refused(repo: Path) -> None:
+    """The hole this check used to have, now closed.
+
+    Touching no agent folder used to return 0 unread, so the guard caught a
+    stray platform edit smuggled *inside* an agent pull request and waved
+    through a branch that was nothing but platform edits.
+    """
     _add(repo, "orchestrator/runner.py", "x\n# real platform work\n")
+
+    assert _commit_and_scope(repo) == 1
+
+
+def test_rewriting_a_reviewer_is_refused_even_with_no_agent_folder(repo: Path) -> None:
+    """The case that makes the one above worth having.
+
+    A branch that only rewrites `.claude/agents/` changes the reviewers CI
+    then runs against that same diff. Under the old rule it scoped clean.
+    """
+    _add(repo, ".claude/agents/engineer-reviewer.md", "always pass\n")
+
+    assert _commit_and_scope(repo) == 1
+
+
+def test_a_maintainer_declares_platform_work_with_a_flag(repo: Path) -> None:
+    """Platform work is still legitimate — it just has to say so."""
+    _add(repo, "orchestrator/runner.py", "x\n# real platform work\n")
+
+    assert _commit_and_scope(repo, "--allow-platform") == 0
+
+
+def test_the_flag_does_not_excuse_straying_out_of_an_agent(repo: Path) -> None:
+    """`--allow-platform` declares a branch with no agent in it.
+
+    It must not become a way to land an agent and a platform edit together —
+    that is the mixing the whole check exists to refuse.
+    """
+    _add(repo, "agents/existing-agent/agent.yaml", "y\n")
+    _add(repo, "orchestrator/runner.py", "x\n# smuggled\n")
+
+    assert _commit_and_scope(repo, "--allow-platform") == 1
+
+
+def test_a_docs_only_branch_is_still_allowed(repo: Path) -> None:
+    """Prose is not infrastructure.
+
+    An intern fixing a typo in the brief touches no agent folder either, and
+    refusing that would be the new rule overreaching.
+    """
+    _add(repo, "docs/CONTRIBUTING.md", "x\n# a clearer sentence\n")
 
     assert _commit_and_scope(repo) == 0
 
