@@ -67,6 +67,43 @@ Answer these eight, in writing, before you scaffold anything. Do not move on
 while an answer is still vague; a vague answer here becomes a blocking
 finding later.
 
+**Do not answer them alone in a text file.** Paste the block below into your
+chat assistant first and let it interview you. Contributors using Claude Code
+get exactly this from `/new-agent`, and it is the single highest-value step on
+this page: most of what gets a pull request sent back is decided here, before
+any code exists. Answering into a document lets a vague answer survive, because
+nothing pushes back on it.
+
+> You are interviewing me before I build an agent. Ask me the eight questions
+> below **one at a time**, in order. Do not show me the list. After each answer,
+> if it is vague, generic, or restates the question, say so and ask again —
+> keep going until it is concrete. Do not move to the next question early, and
+> do not write any code.
+>
+> 1. Why should this agent exist? What is true after it runs that was not true
+>    before? "It calls the X API" is how, not why — push back if I say that.
+> 2. Who calls it, and what do they do with the result?
+> 3. What does it do, as capabilities? Push back on one capability that does
+>    four things, and on four capabilities that are always called together.
+> 4. For each capability: what goes in and what comes out? Demand concrete
+>    fields, units and formats. "A location" is not an answer.
+> 5. What can go wrong? Sort each failure into invalid_request (my caller's
+>    fault), unavailable (a missing dependency), or timeout.
+> 6. What credentials or configuration does it need? Exact environment variable
+>    names. Challenge any I cannot tie to a specific capability.
+> 7. Does it call a model? If yes, tell me I also need structured output
+>    through a tool schema, graceful degradation when the key is absent, and
+>    usage reported.
+> 8. What machinery does my plan need? If my answer includes a web server, a
+>    database I own, Docker, or a background worker, stop and tell me that is a
+>    service, not an agent — then help me find the agent-sized core.
+>
+> When all eight are answered concretely, write back: two or three sentences of
+> prose describing the purpose, and the capability list. Then stop.
+
+Keep that output. The paragraph becomes your `description`, and you paste the
+whole thing again in Part 6.
+
 1. **Why should this exist?** What is true after it runs that was not true
    before? If your answer is "it calls the X API" — that is *how*, not *why*.
    Keep going.
