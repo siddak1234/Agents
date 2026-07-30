@@ -51,6 +51,8 @@ uv run agents verify                          # every deterministic gate CI runs
 uv run agents scope --base origin/main        # …except this one: it needs a base
 ```
 
+Working from a fork? Use `--base upstream/main` — see "Adding an agent".
+
 Every call runs the agent as a subprocess **in its own folder, with its own
 environment**. That is what makes an agent's relative paths resolve, keeps one
 agent's dependencies from breaking another's, and stops an agent seeing
@@ -58,14 +60,101 @@ credentials it never declared.
 
 ## Adding an agent
 
-`uv run agents new my-agent`, then follow
-[`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md). Building from claude.ai chat instead
-of Claude Code? [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the
-self-contained version — paste it into a chat and it carries the whole
-contract with it. Two examples exist on purpose: `agents/_template/` is
-the skeleton, `agents/realty-lead-gen/` is a worked reference that calls a
-model —
-structured output, graceful degradation, its own locked dependencies.
+You need **no access to this repository** — fork it. You need **no coding
+tool**: git, [`uv`](https://docs.astral.sh/uv/), a text editor and any free
+chat assistant are enough. The steps below are the whole path, in order.
+[`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md) is the same path with the
+contract attached; open it at step 4 and keep it open.
+
+**1. Fork.** Press Fork on this page. Your fork is yours — you have write
+access to it and none to this one.
+
+**2. Clone it, and point `upstream` here.**
+
+```bash
+git clone https://github.com/<you>/Agents.git
+cd Agents
+git remote add upstream https://github.com/siddak1234/Agents.git
+git fetch upstream
+uv sync --frozen
+uv run agents list          # prints the agents that already exist
+```
+
+`upstream` is not optional. Your `origin/main` freezes at the moment you
+forked, so every check that compares against "main" must use `upstream/main`
+or it judges your work against a stale snapshot.
+
+**3. Decide what the agent is** — before any code.
+[`INTERN_BRIEF.md` Part 2](./docs/INTERN_BRIEF.md) asks eight questions. Answer
+them in writing. Read the `agents list` output first: if an existing agent owns
+this ground, the right contribution is a capability on that agent.
+
+**4. Scaffold, then branch.**
+
+```bash
+uv run agents new parcel-geo     # your name, lowercase-with-hyphens
+git checkout -b parcel-geo
+```
+
+`agents new` copies `agents/_template/`, sets the name in the two files that
+must agree, registers it in `registry.yaml`, adds the README row, and prints
+the five things it deliberately did **not** do. Leave your fork's `main` alone
+as a mirror of `upstream/main` — work on the branch, or your second agent's
+pull request will carry your first.
+
+**5. Build it.** Paste [`INTERN_BRIEF.md` Part 6](./docs/INTERN_BRIEF.md) into
+any chat assistant, with your Part 2 answers. Part 6 is self-contained — wire
+format, the five error types, the six rules, `agent.yaml`, a working skeleton,
+and a ready-made prompt. Save the files it returns into `agents/parcel-geo/`.
+
+**6. Work the to-do list.** A fresh scaffold fails on purpose. `uv run agents
+list --strict` names every reason:
+
+```
+error: parcel-geo: no LICENSE...
+error: parcel-geo: still has `TODO(new agent)` markers in README.md, agent.yaml,
+       agent_main.py, tests/test_agent.py...
+error: parcel-geo/agent.yaml: description is still the template's...
+error: parcel-geo/agent.yaml: offers only the template's example capabilities...
+```
+
+Those four are the difference between a renamed copy and an agent.
+
+**7. Prove it.**
+
+```bash
+uv run agents verify                        # must print: All 10 gates pass
+git fetch upstream
+uv run agents scope --base upstream/main    # must print: ok    scope: parcel-geo
+```
+
+`verify` is the ten gates CI runs; its output is your to-do list until it is
+clean. `scope` checks you changed only your own agent.
+
+**8. Self-review.** [`INTERN_BRIEF.md` Part 5](./docs/INTERN_BRIEF.md) has a
+nine-item list — declared capabilities matching the code, real schemas,
+`runtime.env.inherit` no wider than you read, no business logic in the
+entrypoint. On a fork this is the first review your work gets, because the
+model-driven board cannot run there: GitHub withholds secrets from fork pull
+requests.
+
+**9. Push to your fork and open the pull request.**
+
+```bash
+git add -A && git commit -m "Add parcel-geo"
+git push -u origin parcel-geo
+```
+
+Then open it on GitHub, from your branch to `siddak1234/Agents` `main`, and
+fill in the template. The deterministic checks run on your pull request — they
+need no credentials, so a fork gets them in full. A maintainer reads the diff
+and approves; you cannot merge it yourself and cannot push to `main`.
+
+Two examples exist on purpose: `agents/_template/` is the skeleton,
+`agents/realty-lead-gen/` is a worked reference that calls a model — structured
+output, graceful degradation, its own locked dependencies.
+[`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) is the same contract written
+for someone who already has the repository open.
 
 ## Development
 

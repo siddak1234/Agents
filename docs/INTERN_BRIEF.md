@@ -156,6 +156,13 @@ git checkout -b my-agent
 *Have Claude Code? `/new-agent` interviews you through Part 2's questions first
 and then runs exactly this command.*
 
+**Work on the branch, not on your fork's `main`.** Nothing stops you committing
+to `main` — branch protection lives on the upstream repository and does not
+reach your fork — and it will appear to work for this agent. It breaks on your
+next one: `agents scope` refuses a branch touching two agents, so if agent one
+lives on your `main`, every later pull request carries it. Keep `main` a mirror
+of `upstream/main` and it stays a clean place to branch from.
+
 That creates `agents/my-agent/` from the template, sets the name in the two
 files that must agree, registers it, and adds it to the README table. Agents
 live under `agents/` — tenant space; everything outside it is the platform.
