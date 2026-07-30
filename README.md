@@ -85,9 +85,12 @@ forked, so every check that compares against "main" must use `upstream/main`
 or it judges your work against a stale snapshot.
 
 **3. Decide what the agent is** — before any code.
-[`INTERN_BRIEF.md` Part 2](./docs/INTERN_BRIEF.md) asks eight questions. Answer
-them in writing. Read the `agents list` output first: if an existing agent owns
-this ground, the right contribution is a capability on that agent.
+[`INTERN_BRIEF.md` Part 2](./docs/INTERN_BRIEF.md) carries an interview prompt:
+paste it into your chat assistant and it asks you eight questions one at a
+time, pushing back while an answer is still vague. That is the highest-value
+step here — most of what gets a pull request sent back is decided in it. Read
+the `agents list` output first: if an existing agent owns this ground, the right
+contribution is a capability on that agent, not a new one.
 
 **4. Scaffold, then branch.**
 
