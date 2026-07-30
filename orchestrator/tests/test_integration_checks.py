@@ -12,12 +12,14 @@ agent — so the first test is literally that copy-and-rename, and it must fail.
 from __future__ import annotations
 
 import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
 
+from orchestrator import discovery
 from orchestrator.cli import main
 from orchestrator.discovery import (
     TEMPLATE_DIR,
@@ -323,6 +325,69 @@ def test_a_migrations_directory_is_caught_despite_holding_only_python(
 
     problems = "\n".join(integration_problems(load_registry(root)))
     assert "alembic/" in problems
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_a_gitignored_env_file_is_not_judged_as_shipped(tmp_path: Path) -> None:
+    """The agent's own README tells the developer to create one.
+
+    `realty-lead-gen/README.md` says `cp .env.example .env` and its config
+    reads that file, so following the documented setup used to fail
+    `agents verify` on a file git is configured never to commit.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    _git(root, "init", "-q", "-b", "main")
+    (agent / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (agent / ".env").write_text("ANTHROPIC_API_KEY=sk-local\n", encoding="utf-8")
+
+    assert integration_problems(load_registry(root)) == []
+
+
+def test_a_force_added_env_file_is_still_caught(tmp_path: Path) -> None:
+    """Ignored is not the test — shippable is.
+
+    This is why the check reads `ls-files` rather than `check-ignore`: the
+    latter calls a force-added `.env` ignored, and a real committed secret
+    would walk straight through.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    _git(root, "init", "-q", "-b", "main")
+    (agent / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (agent / ".env").write_text("ANTHROPIC_API_KEY=sk-real\n", encoding="utf-8")
+    _git(root, "add", "-f", str((agent / ".env").relative_to(root)))
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert ".env is not a file an agent may ship" in problems
+
+
+def test_the_scan_falls_back_to_the_tree_when_git_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No git binary must mean over-report, never a silent pass.
+
+    The not-a-repo path is covered incidentally by every other test here — none
+    of them `git init`. This is the other branch: git missing entirely, which
+    raises `FileNotFoundError` from `subprocess.run`.
+    """
+    root = _repo(tmp_path)
+    agent = _finished(root)
+    (agent / "dump.sql").write_text("select 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        discovery.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError)
+    )
+
+    problems = "\n".join(integration_problems(load_registry(root)))
+    assert "dump.sql is not a file an agent may ship" in problems
 
 
 def test_the_allowlist_admits_everything_a_real_agent_needs(tmp_path: Path) -> None:

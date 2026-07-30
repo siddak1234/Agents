@@ -115,7 +115,7 @@ def _resolve_root(root: Path | None) -> Path:
 
 
 def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
-    """Refuse a branch that adds an agent and edits the platform as well.
+    """Refuse a branch that changes anything but the agent it is contributing.
 
     The other gates ask "is this agent well made?". This one asks "did this
     change stay where it belongs?" — the question that matters when the author
@@ -124,8 +124,15 @@ def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
     shared-code change hidden inside a new-agent pull request is the one thing
     review is least likely to notice.
 
-    A pull request that touches no agent folder is not this command's business:
-    platform work is legitimate and reviewed on its own terms.
+    A branch touching no agent folder at all used to pass unread, on the
+    reasoning that platform work is legitimate and reviewed on its own terms.
+    That reasoning covered the wrong case. It caught a stray platform edit
+    smuggled *inside* an agent pull request and waved through a pull request
+    that was nothing but platform edits — including one rewriting the review
+    board's own reviewers, which CI would then have run against the very diff
+    that rewrote them. Platform work is still legitimate; it now has to say so
+    with `--allow-platform`, which is a maintainer's flag and not something a
+    contributor stumbles into.
     """
     try:
         changed = _changed_paths(root, args.base)
@@ -153,10 +160,15 @@ def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
             if not name.startswith("_")
         }
     )
-    if not touched_agents:
-        print("no agent folders touched; scope check does not apply")
+    if not touched_agents and args.allow_platform:
+        print("ok    scope: platform-only branch, allowed by --allow-platform")
         return 0
 
+    # With no agent folders touched this is empty, and `str.startswith(())` is
+    # False for every path — so every changed file falls through to the stray
+    # filter below and is judged against the three shared paths a contribution
+    # may touch. That is the whole of the platform-only fix: no special case,
+    # just the early return that used to skip this removed.
     allowed_prefixes = tuple(f"{AGENTS_DIR}/{name}/" for name in touched_agents)
     strays = [
         path
@@ -173,12 +185,24 @@ def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
             f"({', '.join(touched_agents)}). One agent per pull request — "
             f"split it, so a problem with one cannot hold up the other."
         )
-    problems.extend(
-        f"{path} is outside your agent's folder. A pull request that adds or "
-        f"changes an agent may touch only {AGENTS_DIR}/<your-agent>/, "
-        f"{REGISTRY_NAME}, README.md and docs/."
-        for path in strays
+    # Two audiences, two sentences. Someone whose agent pull request strayed
+    # needs to know which file to put back; someone whose branch is nothing but
+    # platform edits needs to know that is not a contribution at all. The same
+    # message for both told the second group to move a file into an agent
+    # folder that does not exist.
+    explain = (
+        f"outside your agent's folder. A pull request that adds or changes an "
+        f"agent may touch only {AGENTS_DIR}/<your-agent>/, {REGISTRY_NAME}, "
+        f"README.md and docs/."
+        if touched_agents
+        else (
+            f"shared infrastructure, which a contribution may not change. Put your "
+            f"work in {AGENTS_DIR}/<your-agent>/ instead. If this genuinely is "
+            f"platform work it is a maintainer's pull request, not a contribution — "
+            f"rerun with --allow-platform."
+        )
     )
+    problems.extend(f"{path} is {explain}" for path in strays)
 
     if problems:
         # Capped: a branch that strayed widely produces one problem per file,
@@ -192,14 +216,16 @@ def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         print(
-            f"\n{len(problems)} problem(s). If you meant to change shared code, "
-            f"raise it as its own pull request — that way it is reviewed as a "
-            f"change to every agent, which is what it is.",
+            f"\n{len(problems)} problem(s). Shared code is not a contributor's to "
+            f"change: it is depended on by every agent, so a maintainer raises it "
+            f"as its own pull request and it is reviewed as a change to all of "
+            f"them. Say what you need in yours instead.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"ok    scope: {', '.join(touched_agents)} (+ registry, README, docs)")
+    scoped = ", ".join(touched_agents) if touched_agents else "no agent folder"
+    print(f"ok    scope: {scoped} (+ registry, README, docs)")
     return 0
 
 
@@ -803,6 +829,11 @@ def _parser() -> argparse.ArgumentParser:
         "--base",
         default="origin/main",
         help="branch or ref to diff against (default: origin/main)",
+    )
+    p_scope.add_argument(
+        "--allow-platform",
+        action="store_true",
+        help="maintainer's flag: permit a branch that changes only shared code",
     )
     return parser
 

@@ -17,10 +17,35 @@ Take this branch through review and open a pull request titled `$ARGUMENTS`
 failure — reporting five problems at once teaches less than reporting the one
 that matters.
 
-### 1. Refuse the obvious
+### 1. Put them on a branch
 
-Stop if the branch is `main`, if there is no diff against `origin/main`, or
-if the working tree is dirty. Say which, and stop.
+Stop only for the two things that make review impossible:
+
+- **No diff against `origin/main`** — there is nothing to review.
+- **A dirty working tree** — the gates below read the working tree, so
+  uncommitted work would be tested and then not shipped. Say which files, and
+  stop.
+
+Being on `main` is **not** a reason to stop. It used to be, and it left an
+intern who had committed to `main` with a refusal and no way forward. Instead:
+
+```
+git checkout -b <slug>
+```
+
+Build `<slug>` from the title by a fixed transform, so the same title always
+gives the same branch: lowercase it, drop anything that is not a letter, digit
+or space, drop a leading `a`/`an`/`the`, keep the first four to five remaining
+words, join with hyphens. *"Add a Weather Forecast Agent (v2)"* →
+`add-weather-forecast-agent`. Their commits come with them.
+
+If they are already on a branch, **use it**. Do not create a second one; that
+orphans the work they have been doing.
+
+After the push in step 5, tell them their local `main` still points at those
+commits and that `git reset --hard origin/main` on `main` tidies it. Do not
+run it for them — it discards work if they have misread their own state, and
+nothing here is worth that risk.
 
 ### 2. Deterministic gates — these are free, so they run first
 
@@ -46,6 +71,25 @@ Among those gates, `agents lint` and `agents test` run each agent's own
 declared commands from its own folder, so the agent you just built is checked
 too — there is nothing extra to remember.
 
+`scope` refuses a branch that changes shared code, including one that contains
+nothing else. That is the rule, not a bug to work around: shared code is a
+maintainer's to change.
+
+**Never decide for yourself that a branch is platform work.** `--allow-platform`
+is the one instruction here you could rationalise your way into, and a branch of
+nothing but shared-code edits is exactly what both a maintainer's platform work
+and a contributor straying out of their folder look like from the diff. You
+cannot tell them apart by reading it. So ask, the same way you ask for a missing
+title:
+
+> This branch changes only shared code, which `agents scope` refuses. Are you a
+> maintainer raising this as deliberate platform work? If so I will rerun with
+> `--allow-platform`.
+
+Rerun with the flag **only** after they say yes, and say in your output that you
+did and that they authorised it. If they say no, stop — the fix is to move the
+work into `agents/<their-agent>/`, not to pass the flag.
+
 ### 3. The review board
 
 Invoke these four subagents **in parallel**, each on this branch's diff:
@@ -68,22 +112,47 @@ grouped by reviewer, each with its file, the problem, and the fix. Print
 needs revision, and stop. Do not offer to fix them in this run — the
 contributor revises, then runs `/raise-pr` again.
 
-**No blocking findings → open the pull request:**
+**No blocking findings → step 5.** Nothing reaches GitHub unless it is clean:
+a branch that failed step 2 or was blocked here never becomes a pull request.
+
+### 5. Push, open, comment
 
 ```
+git push -u origin HEAD
 gh pr create --title "<title>" --body "<body>"
 ```
 
+The push is not optional and not implied — `gh pr create` on a branch with no
+remote fails outright. If the push is rejected, say so plainly and **stop**:
+that is write access or branch protection, not a fault in the branch, and
+there is nothing to open a pull request against.
+
 If the branch already has an open pull request, `gh` refuses rather than
-opening a second one. That is not a failure of this command: push instead,
-which updates the existing pull request, and say so.
+opening a second one. That is not a failure either — the push above has
+already updated it. Say so and print its URL.
 
-The body must contain: what the change does, then the board's verdict — every
-reviewer that passed, and any advisory findings carried forward so a human
-reviewer sees what the board chose not to block on. Fill in the repository's
-pull request template rather than replacing it.
+The **body** is what the change does plus the board's verdict: every reviewer
+that passed. Fill in the repository's pull request template rather than
+replacing it.
 
-Finish by printing the pull request URL.
+The **advisory findings go in a comment**, not the body:
+
+```
+gh pr comment <url> --body "<findings>"
+```
+
+Ordered high to low severity, grouped by reviewer, each with its file, the
+problem and the suggestion. A comment is a review surface — it can be replied
+to and resolved — and a body cannot. This is the list the maintainer reads
+before opening the diff, so rank it honestly rather than padding it.
+
+If `gh pr comment` fails, print the findings in full to the terminal and say
+they did not post. The pull request is already open by then, so a swallowed
+error loses the entire review — the one output of this command nothing else
+reproduces.
+
+Finish by printing the pull request URL, and say plainly that merging waits on
+the maintainer's approval.
 
 ## Note
 

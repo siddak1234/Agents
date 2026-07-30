@@ -1,0 +1,45 @@
+# Who must approve what.
+#
+# This file is inert on its own. It becomes enforcement only when branch
+# protection on `main` requires a review from Code Owners — until then it
+# documents an intention and stops nothing. See docs/ROADMAP.md 3.1 and 7.3.
+#
+# Why it exists alongside `agents scope`: the two catch the same mistake at
+# different moments and neither substitutes for the other. `agents scope`
+# tells a contributor immediately, in their own session and in CI, that their
+# branch strayed — fast, specific, and skippable by anyone who simply does not
+# run it. This file is checked by GitHub at merge, so it is not skippable at
+# all. Fast feedback, then a lock.
+
+# Everything, by default. A file nobody thought to name below still needs an
+# owner, and the owner is the maintainer.
+*                       @siddak1234
+
+# The platform. Depended on by every agent, so a change here is a change to
+# all of them.
+/orchestrator/          @siddak1234
+/registry.yaml          @siddak1234
+/pyproject.toml         @siddak1234
+/uv.lock                @siddak1234
+
+# The contract other people implement.
+/docs/AGENT_PROTOCOL.md @siddak1234
+
+# CI, and the review board itself.
+#
+# `.claude/` is named explicitly rather than left to the `*` rule above, and
+# the reason is concrete. A branch that rewrote `.claude/agents/` — the four
+# reviewers — used to pass `agents scope` clean whenever it touched no agent
+# folder, and CI would then have run those rewritten reviewers against the very
+# diff that rewrote them. `agents scope` now refuses that branch; this line is
+# the half that cannot be bypassed by not running a command.
+/.github/               @siddak1234
+/.claude/               @siddak1234
+/.pre-commit-config.yaml @siddak1234
+/.gitignore             @siddak1234
+/.gitattributes         @siddak1234
+
+# Agents are their author's, reviewed by the maintainer. Add a line per agent
+# as contributors arrive — `/agents/parcel-geo/ @siddak1234 @their-handle` —
+# so review routes to someone who knows the code.
+/agents/                @siddak1234

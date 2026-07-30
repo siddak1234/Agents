@@ -18,7 +18,7 @@ Two examples, deliberately at opposite ends:
 
 | | What it shows |
 |---|---|
-| [`_template/`](../agents/_template) | The skeleton. ~100 lines, standard library, runs with no install. **Start here.** |
+| [`_template/`](../agents/_template) | The skeleton. One entrypoint file, standard library, runs with no install. **Start here.** |
 | [`realty-lead-gen/`](../agents/realty-lead-gen) | A worked reference: a model-calling agent with real dependencies — structured output through a tool schema, graceful degradation without a key, integer-cents money. Eleven modules; the service it grew out of lives in its own repository. |
 
 Copy the template. Read the reference when you need to see how something is
@@ -163,11 +163,21 @@ your diff for, which is why a reviewer's finding on them is blocking.
 ## Opening the PR
 
 Small and complete beats large and staged. **One agent per PR, and nothing
-outside it** — `agents scope` enforces both. A branch that adds an agent may
-touch only `agents/<your-agent>/`, `registry.yaml`, `README.md` and `docs/`.
-Anything else fails, including a file your editor reformatted on save. If you
-genuinely need to change shared code, raise that as its own pull request:
-then it is reviewed as a change to *every* agent, which is what it is.
+outside it** — `agents scope` enforces both. A branch may touch only
+`agents/<your-agent>/`, `registry.yaml`, `README.md` and `docs/`. Anything
+else fails, including a file your editor reformatted on save.
+
+That holds whether or not your branch contains an agent. A branch that is
+*only* shared-code edits is refused too — it used to pass unread, which meant
+the guard caught a stray platform edit hidden inside an agent pull request and
+waved through a pull request that was nothing but platform edits. Shared code
+is not a contributor's to change: it is depended on by every agent, so a
+maintainer raises it separately and it is reviewed as a change to all of them.
+Need something from the platform? Say so in your pull request.
+
+Maintainers declare that work with `agents scope --allow-platform`. It only
+covers a branch with no agent in it, so it cannot be used to land an agent and
+a platform edit together.
 
 ```
 /raise-pr Add weather-agent

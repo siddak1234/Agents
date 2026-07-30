@@ -197,8 +197,13 @@ Two rules, both enforced by the build rather than by a reviewer's patience:
 
 **One agent, nothing else.** Your branch may touch `agents/<your-agent>/`,
 `registry.yaml`, `README.md` and `docs/`. Not `orchestrator/`, not another
-person's agent, not `.github/`. If your editor reformats a shared file on
-save, the build fails and names it — that is the check working.
+person's agent, not `.github/`, not `.claude/`. If your editor reformats a
+shared file on save, the build fails and names it — that is the check working.
+
+This applies even if your branch has no agent in it. A branch of nothing but
+shared-code edits is refused, not waved through. Shared code is depended on by
+every agent, so changing it is a maintainer's pull request reviewed as a change
+to all of them — if you need something from the platform, say so in yours.
 
 **Only files an agent ships.** Inside your folder: `.py`, `.md`, `.toml`,
 `.json`, `.lock`, `.txt`, `.example`, plus `agent.yaml`, `LICENSE`,

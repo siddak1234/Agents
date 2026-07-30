@@ -65,7 +65,7 @@ here exists yet, and most of it is cheap.
 
 | | Item | Why | Status |
 |---|---|---|---|
-| 3.1 | `CODEOWNERS` mapping each agent folder to its author | Review routing, and one tenant cannot silently edit another's agent | ⬜ |
+| 3.1 | `CODEOWNERS` mapping each agent folder to its author | Review routing, and one tenant cannot silently edit another's agent | 🟡 the file exists and owns the platform paths; per-agent author rows wait on real contributors, and it enforces nothing until 7.3 |
 | 3.2 | `owner` in `agent.yaml` | The manifest should say whose it is | ⬜ |
 | 3.3 | `version` in `agent.yaml`, and a compatibility policy | Agents change; callers need something to pin | ⬜ |
 | 3.4 | Lifecycle the orchestrator honours — `active`, `deprecated`, `disabled` | No `status` field exists anywhere yet; the README table's Status column is prose nothing reads or validates | ⬜ |

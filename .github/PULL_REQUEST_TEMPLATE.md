@@ -29,6 +29,9 @@ Delete the section that does not apply.
 
 ### Changing the orchestrator or the contract
 
+- [ ] `uv run agents scope --base origin/main --allow-platform` passes — the
+      flag is how a maintainer declares platform work, and it only covers a
+      branch with no agent in it
 - [ ] A test fails without this change
 - [ ] `docs/AGENT_PROTOCOL.md` updated if the wire format or guarantees moved
 - [ ] No agent-specific behaviour added to shared code
