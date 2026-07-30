@@ -72,8 +72,13 @@ structured output, graceful degradation, its own locked dependencies.
 ```bash
 uv run agents verify        # every deterministic gate CI runs, in one command
 uv run agents scope --base origin/main   # the one it cannot: your branch vs main
+uv run agents scope --base origin/main --allow-platform   # …if it is platform work
 uv run pre-commit install   # optional: most of the same gates, per commit
 ```
+
+`scope` refuses a branch that changes shared code, including one that changes
+nothing else — that is a maintainer's pull request, and `--allow-platform`
+says so. The flag is inert once an agent folder is touched.
 
 `agents verify` is the contributor-facing definition of the gates — when a
 gate is added it belongs there and in the CI workflows, never only in a doc.

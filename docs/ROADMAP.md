@@ -9,9 +9,13 @@ merged — with each tenant isolated from the others.
 
 **Today.** A monorepo with a deterministic contract, a local orchestrator, one
 production agent, and a review board that has now run twice — blocking a
-deliberately bad agent and passing a correct one, both locally. It is not yet
-a *gate*: that needs a token, branch protection, **and a decision about how
-contributors arrive** — GitHub withholds secrets from fork pull requests, so
+deliberately bad agent and passing a correct one, both locally. `main` is
+protected — pull request, one approval, code-owner review, deterministic
+checks — and the arrival question is decided: **collaborators, not forks**.
+What is left is the token. Until `CLAUDE_CODE_OAUTH_TOKEN` exists the board
+skips itself and its job still exits 0, so it is deliberately not a required
+check; requiring it now would be a green tick over a review that never ran.
+That ordering matters because GitHub withholds secrets from fork pull requests, so
 under the safe `pull_request` trigger this repository uses, the board can
 never run on a fork's PR. (`pull_request_target` would hand secrets to
 unreviewed fork code; `review.yml`'s header explains why that trade is
@@ -35,11 +39,11 @@ serve, and one stage of it is empty.
 | 1.3 | Integration completeness — a renamed template is rejected | ✅ |
 | 1.4 | `/raise-pr` — gates, then board, then PR or denial | ✅ a command under `.claude/commands/`, and executed. Command rather than skill because where the two names collide the skill wins, so shipping both would mean two copies of one procedure — and raising a pull request should be user-invoked, never something Claude decides to do |
 | 1.5 | Review board — four reviewers, one lens each | ✅ executed twice; blocked the bad agent, passed the good one |
-| 1.6 | CI review gate on the pull request | 🟡 needs secret + branch protection |
+| 1.6 | CI review gate on the pull request | 🟡 branch protection is on; needs the secret, then the check added |
 | 1.7 | First end-to-end run against a deliberately bad agent | ✅ 10 blocking findings across three reviewers |
 
 **Every stage now has something behind it.** What remains is 1.6: the board
-advises, and only branch protection plus a token make it decide.
+advises. Branch protection is on; the token is what is left.
 
 ## W2 — Guidance while they build
 
@@ -141,7 +145,7 @@ nothing worth knowing.
 |---|---|---|
 | 7.1 | Deterministic CI, scoped to what changed | ✅ |
 | 7.2 | `CLAUDE_CODE_OAUTH_TOKEN` repository secret (no API key needed — `claude setup-token`) | 🔒 |
-| 7.3 | **review board** required in branch protection | 🔒 |
+| 7.3 | **review board** required in branch protection | 🟡 protection is on with the two deterministic checks; the board is excluded on purpose until 7.2 — it exits 0 without a token |
 | 7.4 | Repository visibility decided — it is Public and `realty-lead-gen/LICENSE` says proprietary | 🔒 |
 | 7.5 | Secret scanning at root | ✅ |
 | 7.6 | Repository off iCloud-synced storage | 🟡 both `.venv`s relocated out via symlink; the working copy itself is still on Desktop |
@@ -150,9 +154,9 @@ nothing worth knowing.
 
 ## Order of work
 
-**Now — W1.6.** W1.1 and W2 are done. The board runs and its findings are
-specific enough to act on, but nothing forces anyone to listen: that is a
-token and a required status check, and both need the owner.
+**Now — W1.6.** W1.1 and W2 are done, and `main` is protected. The board runs
+and its findings are specific enough to act on, but nothing forces anyone to
+listen: that is the token, then adding the check. Both need the owner.
 
 **Next — W3.** Ownership, version, and trust tier are small manifest and
 `CODEOWNERS` changes that become expensive to retrofit once agents exist.
