@@ -7,6 +7,22 @@ request in, one structured result out, with cost attached. The contract is
 [`docs/AGENT_PROTOCOL.md`](./docs/AGENT_PROTOCOL.md) and it is the only thing the
 orchestrator knows about any agent.
 
+Every agent is independent. It lives in its own folder, brings its own
+dependencies, and is called in its own process — so one agent cannot break
+another, and any agent still works if you copy its folder out. That isolation
+is the point of the repository, and the contract is what buys it.
+
+> ### 👉 Here to build an agent? Start with [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md)
+>
+> One page, start to finish. You need **no access to this repository** — you
+> fork it — and **no coding tool**: git, [`uv`](https://docs.astral.sh/uv/), a
+> text editor, and any free chat assistant. It carries the whole contract with
+> it, so a chat that has never seen this repository can still help you build a
+> correct agent.
+>
+> [Adding an agent](#adding-an-agent) below is the same path in nine steps, if
+> you prefer the summary first.
+
 ## Layout
 
 Three folders, and building an agent needs only two of them:
