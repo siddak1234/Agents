@@ -15,10 +15,21 @@ is the point of the repository, and the contract is what buys it.
 > ### 👉 Here to build an agent? Start with [`docs/INTERN_BRIEF.md`](./docs/INTERN_BRIEF.md)
 >
 > One page, start to finish. You need **no access to this repository** — you
-> fork it — and **no coding tool**: git, [`uv`](https://docs.astral.sh/uv/), a
-> text editor, and any free chat assistant. It carries the whole contract with
-> it, so a chat that has never seen this repository can still help you build a
-> correct agent.
+> fork it — and you need git plus [`uv`](https://docs.astral.sh/uv/). Nothing
+> else is required.
+>
+> **Two ways to build, both fully supported:**
+>
+> - **With Claude Code** — `/new-agent` interviews you and scaffolds; `/raise-pr`
+>   runs the gates, puts your branch in front of four reviewers, and opens the
+>   pull request.
+> - **With any chat assistant, outside an IDE** — ChatGPT, Gemini, Claude.ai,
+>   whatever you have. The brief is written for this and carries the whole
+>   contract inside it, so a chat that has never seen this repository can still
+>   help you build a correct agent. Part 2 is an interview prompt you paste in;
+>   Part 6 is the contract.
+>
+> Same standard either way — the gates and the review do not care which you used.
 >
 > [Adding an agent](#adding-an-agent) below is the same path in nine steps, if
 > you prefer the summary first.
