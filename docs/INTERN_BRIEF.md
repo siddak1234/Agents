@@ -5,8 +5,12 @@ you need. Parts 1 to 5 are for you to follow; **Part 6 is the part you paste
 into a Claude conversation**, along with your own answers from Part 2. There
 is a ready-made prompt at the end.
 
-If you are using Claude Code instead, you do not need this — run
-`/new-agent` and it will interview you.
+**You do not need Claude Code, Copilot, Cursor or any coding tool.** Everything
+here works with git, `uv`, a text editor, and any free chat assistant you can
+paste text into. That is the path this page is written for. If you *do* have
+Claude Code, two shortcuts exist and are pointed out where they apply
+(`/new-agent` in Part 3, `/raise-pr` in Part 5) — they save typing, nothing
+more, and the result is judged identically.
 
 This file is self-contained on purpose. You can read it on GitHub, or grab it
 without cloning anything:
@@ -37,11 +41,20 @@ Then fork this repository on GitHub, and:
 ```bash
 git clone https://github.com/<you>/Agents.git
 cd Agents
+git remote add upstream https://github.com/siddak1234/Agents.git
+git fetch upstream
 uv sync --frozen
 uv run agents list          # should print the agents that already exist
 ```
 
 If that last command prints a list, you are ready.
+
+**Do not skip the `upstream` remote.** After forking, your `origin` is *your*
+copy of the repository, and `origin/main` freezes at the moment you forked.
+Every check that compares your branch against "main" must compare against
+`upstream/main` — the real one — or it silently judges your work against a
+stale snapshot and passes things it should refuse. Refresh it with
+`git fetch upstream` whenever you have been away.
 
 ## Part 2 — Decide what your agent is
 
@@ -140,6 +153,9 @@ uv run agents new my-agent    # use your agent's real name, lowercase-with-hyphe
 git checkout -b my-agent
 ```
 
+*Have Claude Code? `/new-agent` interviews you through Part 2's questions first
+and then runs exactly this command.*
+
 That creates `agents/my-agent/` from the template, sets the name in the two
 files that must agree, registers it, and adds it to the README table. Agents
 live under `agents/` — tenant space; everything outside it is the platform.
@@ -160,12 +176,21 @@ first, and the list it prints is your to-do list.** When it prints
 not run*, that is not a pass — a tool or `.git` is missing locally, and CI
 will still run them.
 
-Two CI checks are outside this command, and it prints a reminder of the one
-you can act on. `agents scope` compares your branch against `main`, which
-needs a base this command has no way to guess — run
-`uv run agents scope --base origin/main` before you push. The other is the
-model-driven review board, which needs a token the repository owner
-configures.
+One more check sits outside this command, and it prints a reminder of it.
+`agents scope` compares your branch against main, which needs a base this
+command has no way to guess. On a fork that base is **`upstream/main`**, never
+`origin/main` — see Part 1:
+
+```bash
+git fetch upstream
+uv run agents scope --base upstream/main
+```
+
+It answers one question: did you change only your own agent? Your branch may
+touch `agents/<your-agent>/`, `registry.yaml`, `README.md` and `docs/` —
+nothing else. It refuses a branch of shared-code edits even if that is all it
+contains. `--allow-platform` exists for maintainers and is not for you; if
+scope refuses your branch, move the work into your agent's folder.
 
 The ten, so you know what is being asked of you:
 
@@ -217,17 +242,52 @@ and CI exercises it on every build.
 
 ## Part 5 — Open the pull request
 
+Run these four in order. Do not push until the first two are clean — a red
+pull request costs the maintainer a review cycle you could have spent yourself.
+
 ```bash
+uv run agents verify                             # must print: All 10 gates pass
+git fetch upstream
+uv run agents scope --base upstream/main         # must print: ok    scope: my-agent
 git add -A && git commit -m "Add my-agent"
 git push -u origin my-agent
 ```
 
-Then open the pull request on GitHub. CI runs the same gates. Fill in the
-checklist in the PR template.
+Then open the pull request on GitHub, from your fork's branch to
+`siddak1234/Agents` `main`. Fill in the checklist in the pull request template
+— tick only what you actually ran.
 
-You cannot merge it yourself, and you cannot push to `main` — `main` is
-protected and every change needs the maintainer's approving review. Expect to
-revise: that is the process working, not you failing it.
+**Before you open it, check these yourself.** Nothing automated will do it for
+you on a fork, so this list is the review your work gets first:
+
+- [ ] `agent.yaml` description is two or three sentences of your own — not the
+      template's, not a restatement of the name
+- [ ] Every capability in `agent_main.py` is in `agent.yaml`, and the reverse
+- [ ] Each capability has a real `input_schema` and `output_schema`
+- [ ] `runtime.env.inherit` lists only variables your code actually reads
+- [ ] `agent_main.py` has no business logic — it translates the protocol and
+      calls your module
+- [ ] A missing credential returns `unavailable`; you never wrote
+      `os.environ["KEY"]`
+- [ ] Your tests would fail if the capability were deleted
+- [ ] `LICENSE` exists and you chose it deliberately
+- [ ] No `TODO(new agent)` marker left anywhere in your folder
+
+### What happens next
+
+CI runs the same deterministic gates on your pull request — they need no
+credentials, so they run on a fork exactly as they ran for you. The four-reviewer
+board does **not** run on a fork: GitHub withholds secrets from fork pull
+requests, so a human reads your diff instead. That is why the checklist above
+is worth your time.
+
+You cannot merge your own pull request and you cannot push to `main` — it is
+protected, and every change needs the maintainer's approving review. Expect to
+revise. That is the process working, not you failing it.
+
+*Have Claude Code? `/raise-pr` runs the gates, then the four reviewers, then
+opens the pull request for you — and refuses to open one if a reviewer finds a
+real defect. It is a shortcut, not a different standard.*
 
 ---
 
