@@ -22,3 +22,4 @@ agents:
   - path: agents/investment-due-diligence
   - path: agents/commercial-lease-agent
   - path: agents/loan-emi-eligibility
+  - path: agents/readability-grader

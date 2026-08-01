@@ -1,0 +1,85 @@
+protocol: agentcall/v1
+
+name: readability-grader
+
+description: >-
+  Scores a block of text for reading difficulty using the Flesch-Kincaid
+  and Flesch Reading Ease formulas, returning a US grade-level estimate
+  and a plain verdict. Built for content pipelines, EdTech authoring
+  tools, or healthcare document checkers that need to verify text is
+  written at an appropriate reading level before it reaches students or
+  patients.
+
+runtime:
+  type: subprocess
+  # uv resolves the interpreter directly rather than searching PATH, which
+  # avoids Windows' python launcher/install-manager stub intercepting a bare
+  # "python"/"python3" call. Still standard-library only otherwise.
+  command: ["uv", "run", "python", "agent_main.py"]
+  test: ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["uv", "run", "python", "-m", "compileall", "-q", "."]
+
+  # No credentials, no network, no external service. Nothing to inherit.
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  - name: grade_text
+    description: >
+      Score a block of text for reading difficulty and return a US
+      grade-level estimate plus a plain verdict.
+    input_schema:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: The text to score. Must be non-empty and contain at least one sentence.
+        target_grade:
+          type: number
+          description: >
+            Optional target US grade level. When given, the response
+            includes whether the text's computed grade level meets it
+            (is at or below it).
+      additionalProperties: false
+    output_schema:
+      type: object
+      required:
+        - word_count
+        - sentence_count
+        - avg_sentence_length
+        - avg_syllables_per_word
+        - flesch_reading_ease
+        - flesch_kincaid_grade
+        - verdict
+        - meets_target
+      properties:
+        word_count: { type: integer }
+        sentence_count: { type: integer }
+        avg_sentence_length: { type: number }
+        avg_syllables_per_word: { type: number }
+        flesch_reading_ease: { type: number }
+        flesch_kincaid_grade: { type: number }
+        verdict: { type: string }
+        meets_target:
+          type: [boolean, "null"]
+          description: null when target_grade was not provided in the request.

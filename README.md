@@ -62,6 +62,7 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 | [`investment-due-diligence`](./agents/investment-due-diligence) | active | `property_intelligence`, `financial_analysis`, `location_infrastructure_analysis`, `risk_assessment`, `investment_recommendation` |
 | [`commercial-lease-agent`](./agents/commercial-lease-agent) | active | `describe`, `extract_clauses`, `calculate_deadline` |
 | [`loan-emi-eligibility`](./agents/loan-emi-eligibility) | active | `describe`, `calculate_emi`, `check_eligibility` |
+| [`readability-grader`](./agents/readability-grader) | active | `grade_text` |
 
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered
