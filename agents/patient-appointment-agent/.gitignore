@@ -1,0 +1,5 @@
+.env
+tests/.env
+appointments_db.json
+__pycache__/
+*.pyc
