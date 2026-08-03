@@ -18,6 +18,7 @@ def call(request: dict) -> dict:
         capture_output=True,
         text=True,
         cwd=AGENT_DIR,
+        check=False,
     )
     assert proc.returncode == 0, f"non-zero exit, stderr:\n{proc.stderr}"
     return json.loads(proc.stdout)  # fails if anything else was printed
@@ -37,6 +38,7 @@ class TestProtocolErrors(unittest.TestCase):
             [sys.executable, "agent_main.py"],
             input="not json {{{",
             capture_output=True, text=True, cwd=AGENT_DIR,
+            check=False,
         )
         envelope = json.loads(proc.stdout)
         self.assertFalse(envelope["ok"])

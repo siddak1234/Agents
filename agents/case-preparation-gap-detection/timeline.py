@@ -7,11 +7,28 @@ import re
 from datetime import datetime
 from typing import Any
 
+_FIR_FILED_PATTERN = re.compile(
+    r"filed\s*(?:on)?\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE
+)
+
+
+def _fir_filing_date(text: str) -> datetime | None:
+    """Only a date explicitly labeled as when the FIR was filed —
+    never the earliest date anywhere in the document, which previously
+    picked up unrelated dates like a date of birth and silently defeated
+    the whole conflict check."""
+    match = _FIR_FILED_PATTERN.search(text)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y-%m-%d")  # noqa: DTZ007 — calendar dates from legal documents have no timezone
+    except ValueError:
+        return None
+
+
 # Evidence types that should logically be dated on or after the FIR —
 # they're collected in response to an incident already reported.
-_EVIDENCE_TYPES_EXPECTING_POST_FIR_DATE = {
-    "medical_report", "post_mortem_report", "forensic_report",
-}
+_EVIDENCE_TYPES_EXPECTING_POST_FIR_DATE = {"post_mortem_report"}
 
 _DATE_PATTERNS: list[tuple[str, str]] = [
     (r"\b(\d{4})-(\d{2})-(\d{2})\b", "%Y-%m-%d"),
@@ -32,20 +49,19 @@ def _extract_dates(text: str) -> list[tuple[datetime, str]]:
     for pattern, fmt in _DATE_PATTERNS:
         for match in re.finditer(pattern, text):
             try:
-                dt = datetime.strptime(match.group(0), fmt)
+                dt = datetime.strptime(match.group(0), fmt)  # noqa: DTZ007 — calendar dates from legal documents have no timezone
             except ValueError:
                 continue
             found.append((dt, _snippet(text, match.start(), match.end())))
 
     for match in _MONTH_NAME_PATTERN.finditer(text):
         try:
-            dt = datetime.strptime(match.group(0), "%d %B %Y")
+            dt = datetime.strptime(match.group(0), "%d %B %Y")  # noqa: DTZ007 — calendar dates from legal documents have no timezone
         except ValueError:
             continue
         found.append((dt, _snippet(text, match.start(), match.end())))
 
     return found
-
 
 def _snippet(text: str, start: int, end: int, radius: int = 40) -> str:
     lo = max(0, start - radius)
@@ -58,6 +74,7 @@ def build_timeline(
     classification: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     type_by_id = {c["id"]: c["type"] for c in classification}
+    documents_by_id = {doc["id"]: doc["text"] for doc in documents}
     timeline: list[dict[str, Any]] = []
     dates_by_doc: dict[str, list[datetime]] = {}
 
@@ -72,26 +89,38 @@ def build_timeline(
             })
 
     timeline.sort(key=lambda entry: entry["date"])
-    issues = _find_issues(dates_by_doc, type_by_id)
+    issues = _find_issues(dates_by_doc, type_by_id, documents_by_id)
     return timeline, issues
 
 
 def _find_issues(
     dates_by_doc: dict[str, list[datetime]],
     type_by_id: dict[str, str],
+    documents_by_id: dict[str, str],
 ) -> list[dict[str, Any]]:
-    fir_dates = [
-        dt
-        for doc_id, dtype in type_by_id.items()
-        if dtype == "fir"
-        for dt in dates_by_doc.get(doc_id, [])
-    ]
-    if not fir_dates:
+    fir_ids = [doc_id for doc_id, dtype in type_by_id.items() if dtype == "fir"]
+    if not fir_ids:
         return []  # nothing to compare against
 
-    fir_date = min(fir_dates)
-    issues: list[dict[str, Any]] = []
+    fir_date: datetime | None = None
+    for doc_id in fir_ids:
+        candidate = _fir_filing_date(documents_by_id[doc_id])
+        if candidate is not None:
+            fir_date = candidate
+            break
 
+    if fir_date is None:
+        return [{
+            "type": "missing_date",
+            "description": (
+                "An FIR document is present but no clearly labeled filing "
+                "date ('filed on YYYY-MM-DD') could be found, so timeline "
+                "consistency could not be checked."
+            ),
+            "docs": fir_ids,
+        }]
+
+    issues: list[dict[str, Any]] = []
     for doc_id, dtype in type_by_id.items():
         if dtype not in _EVIDENCE_TYPES_EXPECTING_POST_FIR_DATE:
             continue
@@ -103,9 +132,11 @@ def _find_issues(
             issues.append({
                 "type": "date_conflict",
                 "description": (
-                    f"{dtype.replace('_', ' ')} in '{doc_id}' is dated "
+                    f"Post-mortem report in '{doc_id}' is dated "
                     f"{earliest.strftime('%Y-%m-%d')}, before the FIR date "
-                    f"{fir_date.strftime('%Y-%m-%d')}"
+                    f"{fir_date.strftime('%Y-%m-%d')} — a death investigation "
+                    f"cannot precede the incident being reported; check whether "
+                    f"the FIR was filed late or a date was recorded incorrectly."
                 ),
                 "docs": [doc_id],
             })

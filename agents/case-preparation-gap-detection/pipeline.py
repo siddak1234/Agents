@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from classifier import classify_documents
-from timeline import build_timeline
 from evidence_rules import check_missing_evidence
 from scoring import compute_readiness_score
+from timeline import build_timeline
 
 
 def review_case(case_type: str, documents: list[dict[str, Any]]) -> dict[str, Any]:
@@ -31,15 +31,18 @@ def review_case(case_type: str, documents: list[dict[str, Any]]) -> dict[str, An
         "missing_evidence": missing_evidence,
         "recommendations": recommendations,
     }
-    
+
 
 def _build_recommendations(
     missing_evidence: list[dict[str, Any]],
     timeline_issues: list[dict[str, Any]],
 ) -> list[str]:
-    recs: list[str] = []
-    for item in missing_evidence:
-        recs.append(f"Obtain {item['expected'].replace('_', ' ')} ({item['reason']})")
-    for issue in timeline_issues:
-        recs.append(f"Resolve timeline conflict: {issue['description']}")
+    recs = [
+        f"Obtain {item['expected'].replace('_', ' ')} ({item['reason']})"
+        for item in missing_evidence
+    ]
+    recs.extend(
+        f"Resolve timeline conflict: {issue['description']}"
+        for issue in timeline_issues
+    )
     return recs

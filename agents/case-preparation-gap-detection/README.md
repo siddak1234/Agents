@@ -29,3 +29,7 @@ manually cross-referencing every document.
    classifications into a single 0–100 readiness score.
 
 ## Running it directly
+
+```
+echo '{"protocol": "agentcall/v1", "capability": "review_case", "input": {"case_type": "criminal", "documents": [{"id": "fir1", "text": "First Information Report FIR No. 45/2024 filed 2024-01-10. A knife was recovered from the scene."}, {"id": "med1", "text": "Medical examination report dated 2024-01-12."}]}}' | python3 agent_main.py
+```

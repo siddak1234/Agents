@@ -15,10 +15,13 @@
     "reason": "death alleged"
   },
   {
-    "trigger_keywords": ["eyewitness", "saw", "witnessed"],
+ 
+    
+    "trigger_keywords": ["i saw", "eyewitness", "witnessed the"],
     "expected": "witness_statement",
     "reason": "eyewitness account referenced but no witness statement document found"
-  },
+
+},
   {
     "trigger_keywords": ["cctv", "camera footage", "surveillance"],
     "expected": "forensic_report",

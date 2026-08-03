@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +30,12 @@ def check_missing_evidence(
             if expected_type in present_types:
                 continue  # already satisfied by some document
             for keyword in rule["trigger_keywords"]:
-                if keyword in text_lower:
+                if re.search(rf"\b{re.escape(keyword)}\b", text_lower):
                     missing.append({
                         "expected": expected_type,
                         "reason": rule["reason"],
                         "triggered_by": doc["id"],
+                        "matched": keyword,  # also closes item 10
                     })
                     break  # one hit per rule per document is enough
 
@@ -41,11 +43,19 @@ def check_missing_evidence(
 
 
 def _dedupe(missing: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[tuple[str, str]] = set()
-    result: list[dict[str, Any]] = []
+    """One entry per expected evidence type, with every triggering document
+    listed together — three docs mentioning a knife should produce one
+    recommendation, not three identical ones."""
+    by_expected: dict[str, dict[str, Any]] = {}
     for item in missing:
-        key = (item["expected"], item["triggered_by"])
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
+        expected = item["expected"]
+        if expected not in by_expected:
+            by_expected[expected] = {
+                "expected": expected,
+                "reason": item["reason"],
+                "triggered_by": [item["triggered_by"]],
+                "matched": item["matched"],
+            }
+        else:
+            by_expected[expected]["triggered_by"].append(item["triggered_by"])
+    return list(by_expected.values())

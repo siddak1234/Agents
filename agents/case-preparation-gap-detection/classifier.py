@@ -1,18 +1,15 @@
-"""Classifies each document into a legal document type via keyword rules."""
+"""Classifies each document into a legal document type, scoring every type
+against its vocabulary rather than stopping at the first match — a
+first-match order let a post-mortem worded around "medical examination of
+the deceased" get classified as medical_report because that type happened
+to be checked first."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-# Order matters: checked top to bottom, first match wins.
-_TYPE_RULES: list[tuple[str, list[str]]] = [
-    ("fir", ["first information report", "fir no", "f.i.r"]),
-    ("charge_sheet", ["charge sheet", "chargesheet", "charges framed"]),
-    ("medical_report", ["medical examination", "medical report", "examined the patient"]),
-    ("post_mortem_report", ["post-mortem", "postmortem", "post mortem", "autopsy"]),
-    ("forensic_report", ["forensic", "fingerprint", "ballistic", "dna analysis"]),
-    ("witness_statement", ["statement of witness", "i state that", "deposition"]),
-]
+from doc_vocabulary import DOCUMENT_VOCABULARY
 
 _DEFAULT_TYPE = "other"
 
@@ -27,10 +24,16 @@ def classify_documents(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _classify_one(text: str) -> tuple[str, float]:
     text_lower = text.lower()
-    for doc_type, keywords in _TYPE_RULES:
-        matches = sum(1 for kw in keywords if kw in text_lower)
-        if matches:
-            # More matching phrases -> higher confidence, capped at 0.95.
-            confidence = min(0.6 + 0.15 * matches, 0.95)
-            return doc_type, round(confidence, 2)
-    return _DEFAULT_TYPE, 0.3
+    best_type, best_matches = _DEFAULT_TYPE, 0
+
+    for doc_type, keywords in DOCUMENT_VOCABULARY.items():
+        matches = sum(
+            1 for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", text_lower)
+        )
+        if matches > best_matches:
+            best_type, best_matches = doc_type, matches
+
+    if best_matches == 0:
+        return _DEFAULT_TYPE, 0.3
+    confidence = min(0.6 + 0.15 * best_matches, 0.95)
+    return best_type, round(confidence, 2)

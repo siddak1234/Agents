@@ -37,7 +37,7 @@ def main() -> int:
     return 0  # RULE 2: an envelope was produced.
 
 
-def dispatch(raw: str) -> dict[str, Any]:
+def dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911 — each return is a distinct named validation failure
     try:
         request = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
@@ -69,8 +69,7 @@ def dispatch(raw: str) -> dict[str, Any]:
     return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
 
-def _review_case(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
-    # RULE 4: validate our own input — the schema in agent.yaml is documentation only.
+def _review_case(capability: str, payload: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0911 — same: named validation failures, not incidental branching
     case_type = payload.get("case_type")
     if not isinstance(case_type, str) or not case_type.strip():
         return fail(capability, "invalid_request", "'case_type' must be a non-empty string")
@@ -87,9 +86,12 @@ def _review_case(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(doc.get("text"), str) or not doc["text"].strip():
             return fail(capability, "invalid_request", f"document '{doc.get('id')}' needs non-empty 'text'")
 
-    from pipeline import review_case  # lazy import — rule 6
+    from pipeline import review_case  # noqa: PLC0415 — lazy import per rule 6, keeps describe cheap
+    try:
+        result = review_case(case_type, documents)
+    except Exception as exc:  # noqa: BLE001 — an envelope with the right capability is mandatory
+        return fail(capability, "internal", f"{type(exc).__name__}: {exc}")
 
-    result = review_case(case_type, documents)
     return ok(capability, result)
 
 
