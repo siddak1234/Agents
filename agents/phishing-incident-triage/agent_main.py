@@ -64,9 +64,7 @@ def dispatch(raw: str) -> dict[str, Any]:
     if not isinstance(request, dict):
         return fail("", "invalid_request", "request must be a JSON object")
     if request.get("protocol") != PROTOCOL:
-        return fail(
-            "", "invalid_request", f"unsupported protocol {request.get('protocol')!r}"
-        )
+        return fail("", "invalid_request", f"unsupported protocol {request.get('protocol')!r}")
 
     capability = request.get("capability")
     if not isinstance(capability, str):
@@ -82,9 +80,7 @@ def dispatch(raw: str) -> dict[str, Any]:
             {
                 "name": AGENT_NAME,
                 "protocol": PROTOCOL,
-                "capabilities": [
-                    {"name": n, "description": d} for n, d in CAPABILITIES
-                ],
+                "capabilities": [{"name": n, "description": d} for n, d in CAPABILITIES],
             },
         )
 
@@ -92,9 +88,7 @@ def dispatch(raw: str) -> dict[str, Any]:
         return _triage_email(capability, payload)
 
     declared = ", ".join(n for n, _ in CAPABILITIES)
-    return fail(
-        capability, "invalid_request", f"unknown capability; this agent offers: {declared}"
-    )
+    return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +125,7 @@ def _triage_email(cap: str, payload: dict[str, Any]) -> dict[str, Any]:
     attachments = payload.get("attachments")
     if attachments is None:
         attachments = []
-    if not isinstance(attachments, list) or not all(
-        isinstance(a, str) for a in attachments
-    ):
+    if not isinstance(attachments, list) or not all(isinstance(a, str) for a in attachments):
         return fail(cap, "invalid_request", "'attachments' must be a list of strings")
 
     spf = payload.get("spf")
@@ -147,14 +139,6 @@ def _triage_email(cap: str, payload: dict[str, Any]) -> dict[str, Any]:
     dmarc = payload.get("dmarc")
     if dmarc is not None and not isinstance(dmarc, str):
         return fail(cap, "invalid_request", "'dmarc' must be a string when present")
-
-    user_context = payload.get("user_context")
-    if user_context is not None and not isinstance(user_context, str):
-        return fail(cap, "invalid_request", "'user_context' must be a string when present")
-
-    org_context = payload.get("org_context")
-    if org_context is not None and not isinstance(org_context, str):
-        return fail(cap, "invalid_request", "'org_context' must be a string when present")
 
     # Imported here, not at module load, so `describe` works without them.
     # RULE 6: heavy imports stay inside the handler.
@@ -171,8 +155,6 @@ def _triage_email(cap: str, payload: dict[str, Any]) -> dict[str, Any]:
             spf=spf.strip() if spf else None,
             dkim=dkim.strip() if dkim else None,
             dmarc=dmarc.strip() if dmarc else None,
-            user_context=user_context.strip() if user_context else None,
-            org_context=org_context.strip() if org_context else None,
         )
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc(file=sys.stderr)

@@ -40,17 +40,19 @@ echo '{
 ## What it does
 
 1. **URL analysis** — flags IP-hosted URLs, shorteners, suspicious TLDs,
-   punycode domains, credential-injection patterns, and excessive links.
+   punycode domains, credential-injection patterns, and login/auth
+   keyword paths.
 2. **Sender analysis** — detects free-email providers, reply-to mismatches,
    display-name spoofing, and random local parts.
 3. **Authentication analysis** — evaluates SPF, DKIM, DMARC results and
-   scores failures and missing results.
+   scores failures.  Missing results are reported as warnings, not scored.
 4. **Content analysis** — scans for urgency keywords, social-engineering
    techniques (authority impersonation, urgency/fear, greed, curiosity bait,
    pretexting), credential-harvesting requests, embedded forms, and
    obfuscation.
-5. **Attachment analysis** — flags dangerous executable types, double
-   extensions, and archive files that may contain payloads.
+5. **Attachment analysis** — flags executable payloads, macro-capable
+   documents, double extensions, and archive files that may contain
+   payloads.
 
 Each area contributes a weighted score to a composite 0-100 risk score,
 mapped to `low`, `medium`, `high`, or `critical` severity.
@@ -61,6 +63,15 @@ mapped to `low`, `medium`, `high`, or `critical` severity.
 - Make network requests or call external APIs.
 - Store, cache, or transmit any data.
 - Replace a full email-security gateway — this is first-level triage.
+
+## Accuracy note
+
+Matching is lexical, not semantic: the engine scores surface features —
+keywords, URL structure, file extensions — and will both over- and
+under-report.  A legitimate invoice with a `.doc` attachment still scores
+for a macro-capable document, a portal link whose path contains a login
+keyword still scores, and a well-crafted phish that avoids the keyword
+lists can score low.  Treat the score as triage input, not a verdict.
 
 ## Architecture
 

@@ -15,7 +15,7 @@ runtime:
   type: subprocess
   command: ["python3", "agent_main.py"]
   test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
-  lint: ["python3", "-m", "compileall", "-q", "."]
+  lint: ["uv", "run", "ruff", "check", "."]
   env:
     inherit: []
 
@@ -49,7 +49,7 @@ capabilities:
       (invalid_request) or internal errors (internal).
     input_schema:
       type: object
-      required: [subject, sender, body]
+      required: [subject, sender]
       properties:
         subject:
           type: string
@@ -80,12 +80,6 @@ capabilities:
         dmarc:
           type: string
           description: DMARC authentication result, e.g. "pass", "fail", "none".
-        user_context:
-          type: string
-          description: Optional context about the recipient (role, department).
-        org_context:
-          type: string
-          description: Optional context about the organisation or industry.
       additionalProperties: false
     output_schema:
       type: object
@@ -115,10 +109,18 @@ capabilities:
           description: Risk severity level.
         classification:
           type: string
+          enum:
+            - likely_legitimate
+            - low_risk_suspicious
+            - suspicious_phishing
+            - likely_phishing
+            - spear_phishing
+            - credential_harvesting
           description: >-
-            One of: likely_legitimate, low_risk_suspicious,
-            possibly_legitimate, suspicious_phishing, likely_phishing,
-            spear_phishing, credential_harvesting.
+            Mirrors the severity ladder: likely_legitimate (0-24),
+            low_risk_suspicious (25-49), suspicious_phishing (50-74); the
+            critical band (75+) refines to likely_phishing, spear_phishing,
+            or credential_harvesting.
         detected_indicators:
           type: array
           items: { type: string }

@@ -20,101 +20,278 @@ from urllib.parse import urlparse
 # ---------------------------------------------------------------------------
 
 # High-risk top-level domains commonly used in phishing campaigns.
-SuspiciousTLDs: frozenset[str] = frozenset({
-    ".tk", ".ml", ".ga", ".cf", ".gq", ".buzz", ".xyz", ".top", ".work",
-    ".click", ".link", ".info", ".online", ".site", ".club", ".icu",
-    ".loan", ".racing", ".download", ".stream", ".accountant", ".science",
-    ".party", ".gdn", ".bid", ".win", ".review", ".date", ".faith",
-    ".men", ".tokyo", ".kim", ".ninja",    ".icu",
-})
+SUSPICIOUS_TLDS: frozenset[str] = frozenset(
+    {
+        ".tk",
+        ".ml",
+        ".ga",
+        ".cf",
+        ".gq",
+        ".buzz",
+        ".xyz",
+        ".top",
+        ".work",
+        ".click",
+        ".link",
+        ".info",
+        ".online",
+        ".site",
+        ".club",
+        ".icu",
+        ".loan",
+        ".racing",
+        ".download",
+        ".stream",
+        ".accountant",
+        ".science",
+        ".party",
+        ".gdn",
+        ".bid",
+        ".win",
+        ".review",
+        ".date",
+        ".faith",
+        ".men",
+        ".tokyo",
+        ".kim",
+        ".ninja",
+    }
+)
 
 # Known URL shortener domains (used to hide real destinations).
-URLShorteners: frozenset[str] = frozenset({
-    "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd",
-    "buff.ly", "adf.ly", "bl.ink", "lnkd.in", "rb.gy", "cutt.ly",
-    "shorturl.at", "t.ly", "v.gd", "x.co", "dwz.cn", "qrb.cl",
-})
+URL_SHORTENERS: frozenset[str] = frozenset(
+    {
+        "bit.ly",
+        "tinyurl.com",
+        "t.co",
+        "goo.gl",
+        "ow.ly",
+        "is.gd",
+        "buff.ly",
+        "adf.ly",
+        "bl.ink",
+        "lnkd.in",
+        "rb.gy",
+        "cutt.ly",
+        "shorturl.at",
+        "t.ly",
+        "v.gd",
+        "x.co",
+        "dwz.cn",
+        "qrb.cl",
+    }
+)
 
 # Free email providers whose presence raises the sender-suspicion score.
-FreeEmailProviders: frozenset[str] = frozenset({
-    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
-    "protonmail.com", "proton.me", "mail.com", "zoho.com", "yandex.com",
-    "gmx.com", "fastmail.com", "icloud.com", "live.com", "msn.com",
-    "163.com", "126.com", "qq.com", "rediffmail.com",
-})
+FREE_EMAIL_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "gmail.com",
+        "yahoo.com",
+        "hotmail.com",
+        "outlook.com",
+        "aol.com",
+        "protonmail.com",
+        "proton.me",
+        "mail.com",
+        "zoho.com",
+        "yandex.com",
+        "gmx.com",
+        "fastmail.com",
+        "icloud.com",
+        "live.com",
+        "msn.com",
+        "163.com",
+        "126.com",
+        "qq.com",
+        "rediffmail.com",
+    }
+)
 
 # Urgency / pressure keywords (English, lower-cased).
-UrgencyKeywords: frozenset[str] = frozenset({
-    "urgent", "immediate", "immediately", "act now", "expires today",
-    "last chance", "final warning", "suspended", "locked", "verify now",
-    "confirm your account", "unusual activity", "unauthorized access",
-    "account will be closed", "respond within", "failure to comply",
-    "dear customer", "dear user", "dear sir/madam", "attention required",
-    "security alert", "security notice", "action required",
-    "your account has been compromised", "password expired",
-    "login attempt", "failed login", "unusual sign-in",
-    "reset your password", "update your information",
-    "verify your identity", "confirm your identity",
-    "complete your registration", "confirm your email",
-    "wire transfer", "invoice attached", "payment overdue",
-    "outstanding balance", "past due", "overdue notice",
-    "congratulations you have won", "you have been selected",
-    "claim your prize", "free gift", "limited time offer",
-})
+URGENCY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "urgent",
+        "immediate",
+        "immediately",
+        "act now",
+        "expires today",
+        "last chance",
+        "final warning",
+        "suspended",
+        "locked",
+        "verify now",
+        "confirm your account",
+        "unusual activity",
+        "unauthorized access",
+        "account will be closed",
+        "respond within",
+        "failure to comply",
+        "dear customer",
+        "dear user",
+        "dear sir/madam",
+        "attention required",
+        "security alert",
+        "security notice",
+        "action required",
+        "your account has been compromised",
+        "password expired",
+        "login attempt",
+        "failed login",
+        "unusual sign-in",
+        "reset your password",
+        "update your information",
+        "verify your identity",
+        "confirm your identity",
+        "complete your registration",
+        "confirm your email",
+        "wire transfer",
+        "invoice attached",
+        "payment overdue",
+        "outstanding balance",
+        "past due",
+        "overdue notice",
+        "congratulations you have won",
+        "you have been selected",
+        "claim your prize",
+        "free gift",
+        "limited time offer",
+    }
+)
 
 # Social-engineering technique labels mapped to detection patterns.
-SocialEngineeringPatterns: dict[str, list[re.Pattern[str]]] = {
+#
+# Every term is word-bounded so ordinary text does not false-positive:
+# "first quarter" must not match `irs`, "as a courtesy" must not match
+# `court`.  Terms are bounded per-term rather than with one blanket
+# `\b(...)\b`: `bank` keeps a left-only boundary so it still matches
+# inside "banking", which is a legitimate hit worth keeping.
+SOCIAL_ENGINEERING_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "authority_impersonation": [
-        re.compile(r"(ceo|cfo|cto|director|manager|president|chairman|board)", re.I),
-        re.compile(r"(irs|fbi|police|government|tax authority|court)", re.I),
-        re.compile(r"(microsoft|apple|google|amazon|paypal|netflix|facebook|instagram)", re.I),
-        re.compile(r"(bank|credit union|financial institution)", re.I),
+        re.compile(r"\b(?:ceo|cfo|cto|director|manager|president|chairman|board)\b", re.I),
+        re.compile(r"\b(?:irs|fbi|police|government|tax authority|court)\b", re.I),
+        re.compile(
+            r"\b(?:microsoft|apple|google|amazon|paypal|netflix|facebook|instagram)\b", re.I
+        ),
+        re.compile(r"\bbank|\bcredit union\b|\bfinancial institution\b", re.I),
     ],
     "urgency_fear": [
-        re.compile(r"(will be (closed|suspended|terminated|disabled|locked))", re.I),
-        re.compile(r"(immediate(ly)?|within \d+ hours?|right away)", re.I),
-        re.compile(r"(legal action|lawsuit|arrest warrant|criminal)", re.I),
-        re.compile(r"(failure to (act|respond|comply|verify))", re.I),
+        re.compile(r"\b(?:will be (?:closed|suspended|terminated|disabled|locked))\b", re.I),
+        re.compile(r"\b(?:immediate(?:ly)?|within \d+ hours?|right away)\b", re.I),
+        re.compile(r"\b(?:legal action|lawsuit|arrest warrant|criminal)\b", re.I),
+        re.compile(r"\b(?:failure to (?:act|respond|comply|verify))\b", re.I),
     ],
     "greed": [
-        re.compile(r"(you (have )?won|congratulations|claim (your |the )?(prize|reward|bonus))", re.I),
-        re.compile(r"(free (gift|money|vacation|iPhone|laptop|card))", re.I),
-        re.compile(r"(inheritance|lottery|million|billion|crypto.*airdrop)", re.I),
+        re.compile(
+            r"\b(?:you (?:have )?won|congratulations|claim (?:your |the )?(?:prize|reward|bonus))\b",
+            re.I,
+        ),
+        re.compile(r"\b(?:free (?:gift|money|vacation|iPhone|laptop|card))\b", re.I),
+        re.compile(r"\b(?:inheritance|lottery|million|billion|crypto.*airdrop)\b", re.I),
     ],
     "curiosity_bait": [
-        re.compile(r"(open (attached|this)|click (here|below|the link))", re.I),
-        re.compile(r"(see (attached|below|the attached)|view (document|file|message))", re.I),
-        re.compile(r"(shared (a )?(document|file|photo) with you)", re.I),
+        re.compile(r"\b(?:open (?:attached|this)|click (?:here|below|the link))\b", re.I),
+        re.compile(
+            r"\b(?:see (?:attached|below|the attached)|view (?:document|file|message))\b", re.I
+        ),
+        re.compile(r"\b(?:shared (?:a )?(?:document|file|photo) with you)\b", re.I),
     ],
     "pretexting": [
-        re.compile(r"(i am (the |a )?(prince|minister|official| lawyer))", re.I),
-        re.compile(r"(confidential|private|secret|do not (share|tell))", re.I),
-        re.compile(r"(trust me|on my honor|i promise)", re.I),
+        re.compile(r"\b(?:i am (?:the |a )?(?:prince|minister|official|lawyer))\b", re.I),
+        re.compile(r"\b(?:confidential|private|secret|do not (?:share|tell))\b", re.I),
+        re.compile(r"\b(?:trust me|on my honor|i promise)\b", re.I),
     ],
 }
 
-# Dangerous attachment extensions.
-DangerousExtensions: frozenset[str] = frozenset({
-    ".exe", ".scr", ".com", ".bat", ".cmd", ".vbs", ".vbe", ".js",
-    ".jse", ".wsf", ".wsh", ".ps1", ".msi", ".msp", ".mst", ".cpl",
-    ".hta", ".inf", ".reg", ".rgs", ".sct", ".shb", ".shs", ".lnk",
-    ".pif", ".application", ".gadget", ".msh", ".msh1", ".msh2",
-    ".mshxml", ".msh1xml", ".msh2xml", ".psc1", ".psc2", ".psm1",
-    ".asd", ".rtf", ".doc", ".docm", ".xls", ".xlsm", ".ppt", ".pptm",
-    ".ppam", ".sldx", ".sldm", ".dotm", ".xltm", ".xltx",
-})
+# File extensions that run code on open — genuinely executable payloads.
+EXECUTABLE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".exe",
+        ".scr",
+        ".com",
+        ".bat",
+        ".cmd",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".wsf",
+        ".wsh",
+        ".ps1",
+        ".msi",
+        ".msp",
+        ".mst",
+        ".cpl",
+        ".hta",
+        ".inf",
+        ".reg",
+        ".rgs",
+        ".sct",
+        ".shb",
+        ".shs",
+        ".lnk",
+        ".pif",
+        ".application",
+        ".gadget",
+        ".msh",
+        ".msh1",
+        ".msh2",
+        ".mshxml",
+        ".msh1xml",
+        ".msh2xml",
+        ".psc1",
+        ".psc2",
+        ".psm1",
+    }
+)
+
+# Office formats that can carry active macros or embedded objects.  The
+# macro-free variants (.docx, .xlsx, .pptx, .xltx, .sldx) are deliberately
+# absent: a plain Office document is not a payload, and flagging every
+# invoice as an "executable" would drown real signals.
+MACRO_DOCUMENT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".asd",
+        ".rtf",
+        ".doc",
+        ".docm",
+        ".xls",
+        ".xlsm",
+        ".ppt",
+        ".pptm",
+        ".ppam",
+        ".sldm",
+        ".dotm",
+        ".xltm",
+    }
+)
+
+# Combined set of extension groups treated as dangerous attachments.
+DANGEROUS_EXTENSIONS: frozenset[str] = EXECUTABLE_EXTENSIONS | MACRO_DOCUMENT_EXTENSIONS
 
 # File extensions that are suspicious but not inherently dangerous.
-SuspiciousExtensions: frozenset[str] = frozenset({
-    ".zip", ".rar", ".7z", ".tar", ".gz", ".cab", ".iso", ".img",
-    ".vhd", ".vhdx", ".ones", ".ace", ".arj",
-})
+SUSPICIOUS_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".zip",
+        ".rar",
+        ".7z",
+        ".tar",
+        ".gz",
+        ".cab",
+        ".iso",
+        ".img",
+        ".vhd",
+        ".vhdx",
+        ".ones",
+        ".ace",
+        ".arj",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Scoring weights (deterministic rubric)
 # ---------------------------------------------------------------------------
 
-Weights = {
+WEIGHTS = {
     "url_score": 25,
     "sender_score": 20,
     "header_score": 15,
@@ -127,6 +304,70 @@ Weights = {
 # ---------------------------------------------------------------------------
 
 
+def _inspect_url(url: str) -> tuple[int, list[str]]:
+    """Score a single URL.  Returns (score, reasons)."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    host_lower = host.lower()
+    reasons: list[str] = []
+    score = 0
+
+    # IP address as hostname
+    if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", host):
+        reasons.append("IP address as hostname")
+        score += 8
+
+    # URL shortener
+    if host_lower in URL_SHORTENERS:
+        reasons.append("URL shortener detected")
+        score += 5
+
+    # Suspicious TLD
+    for tld in SUSPICIOUS_TLDS:
+        if host_lower.endswith(tld):
+            reasons.append(f"suspicious TLD ({tld})")
+            score += 6
+            break
+
+    # Credential injection: userinfo (user@host) can hide the real
+    # host.  Test the authority component only — an '@' in a query
+    # parameter (e.g. ?email=alice@corp.com) is ordinary.
+    if parsed.username:
+        reasons.append("@ sign in URL (credential injection)")
+        score += 8
+
+    # Punycode / homograph (contains xn--)
+    if "xn--" in host_lower:
+        reasons.append("punycode / internationalized domain")
+        score += 7
+
+    # Excessive subdomains
+    parts = host.split(".")
+    if len(parts) > 4:
+        reasons.append(f"excessive subdomains ({len(parts)} levels)")
+        score += 4
+
+    # URL path contains login/auth keywords, matched against whole path
+    # segments so ordinary route words like "account" or "invoices" do
+    # not score.
+    path_lower = parsed.path.lower()
+    if re.search(
+        r"(?:^|/)(?:login|signin|sign-in|verify|confirm|secure|update|password|auth)(?:[./]|$)",
+        path_lower,
+    ):
+        reasons.append("path contains login/auth keywords")
+        score += 5
+
+    # Mismatched display text vs href (can't fully detect without context,
+    # but we flag obviously wrong patterns)
+    url_lower = url.strip().lower()
+    if url_lower.startswith("http://") and "secure" in url_lower:
+        reasons.append("http with 'secure' in URL")
+        score += 6
+
+    return score, reasons
+
+
 def _analyse_urls(urls: list[str]) -> tuple[int, list[dict[str, Any]], list[str]]:
     """Analyse embedded URLs and return (score, suspicious_urls, warnings)."""
     if not urls:
@@ -137,73 +378,16 @@ def _analyse_urls(urls: list[str]) -> tuple[int, list[dict[str, Any]], list[str]
     warnings: list[str] = []
 
     for url in urls:
-        url_lower = url.strip().lower()
-        reasons: list[str] = []
-
-        parsed = urlparse(url)
-        host = parsed.hostname or ""
-        host_lower = host.lower()
-
-        # IP address as hostname
-        if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", host):
-            reasons.append("IP address as hostname")
-            score += 8
-
-        # URL shortener
-        if host_lower in URLShorteners:
-            reasons.append("URL shortener detected")
-            score += 5
-
-        # Suspicious TLD
-        for tld in SuspiciousTLDs:
-            if host_lower.endswith(tld):
-                reasons.append(f"suspicious TLD ({tld})")
-                score += 6
-                break
-
-        # @-sign in URL (credential injection)
-        if "@" in url:
-            reasons.append("@ sign in URL (credential injection)")
-            score += 8
-
-        # Punycode / homograph (contains xn--)
-        if "xn--" in host_lower:
-            reasons.append("punycode / internationalized domain")
-            score += 7
-
-        # Excessive subdomains
-        parts = host.split(".")
-        if len(parts) > 4:
-            reasons.append(f"excessive subdomains ({len(parts)} levels)")
-            score += 4
-
-        # URL path contains login/auth keywords
-        path_lower = parsed.path.lower()
-        login_keywords = {"login", "signin", "sign-in", "verify", "confirm",
-                          "account", "secure", "update", "password", "auth"}
-        if any(kw in path_lower for kw in login_keywords):
-            reasons.append("path contains login/auth keywords")
-            score += 5
-
-        # Mismatched display text vs href (can't fully detect without context,
-        # but we flag obviously wrong patterns)
-        if url_lower.startswith("http://") and "secure" in url_lower:
-            reasons.append("http with 'secure' in URL")
-            score += 6
-
+        url_score, reasons = _inspect_url(url)
+        score += url_score
         if reasons:
             suspicious.append({"url": url, "reasons": reasons})
-        else:
-            # Each clean URL still carries a small baseline
-            pass
 
     # Cap the URL score contribution at the weight
-    score = min(score, Weights["url_score"])
+    score = min(score, WEIGHTS["url_score"])
 
     if suspicious:
-        warnings.append(
-            f"{len(suspicious)} of {len(urls)} URLs flagged as suspicious"
-        )
+        warnings.append(f"{len(suspicious)} of {len(urls)} URLs flagged as suspicious")
 
     return score, suspicious, warnings
 
@@ -229,26 +413,25 @@ def _analyse_sender(
         sender_domain = sender_lower.split("@", 1)[1]
 
     # Free email provider
-    if sender_domain in FreeEmailProviders:
+    if sender_domain in FREE_EMAIL_PROVIDERS:
         score += 3
         warnings.append(f"sender uses free email provider ({sender_domain})")
 
     # Sender domain not matching any mentioned organization
-    org_patterns = re.findall(
-        r"(?:from|on behalf of|@)(\w[\w.-]+\.\w{2,})", body, re.I
-    )
+    org_patterns = re.findall(r"(?:from|on behalf of|@)(\w[\w.-]+\.\w{2,})", body, re.I)
     mentioned_domains = {d.lower() for d in org_patterns}
-    if sender_domain and mentioned_domains:
-        if not any(
-            sender_domain == d or sender_domain.endswith("." + d)
-            or d.endswith("." + sender_domain)
+    if (
+        sender_domain
+        and mentioned_domains
+        and not any(
+            sender_domain == d or sender_domain.endswith("." + d) or d.endswith("." + sender_domain)
             for d in mentioned_domains
-        ):
-            score += 4
-            inconsistencies.append(
-                f"sender domain '{sender_domain}' does not match "
-                f"any domain mentioned in body"
-            )
+        )
+    ):
+        score += 4
+        inconsistencies.append(
+            f"sender domain '{sender_domain}' does not match any domain mentioned in body"
+        )
 
     # Reply-to mismatch
     if reply_to:
@@ -260,9 +443,25 @@ def _analyse_sender(
         if reply_domain and sender_domain and reply_domain != sender_domain:
             score += 7
             inconsistencies.append(
-                f"reply-to domain '{reply_domain}' differs from "
-                f"sender domain '{sender_domain}'"
+                f"reply-to domain '{reply_domain}' differs from sender domain '{sender_domain}'"
             )
+
+    # Display-name spoofing and suspicious local parts
+    local_score, local_incs, local_warns = _analyse_sender_local(sender, sender_domain)
+    score += local_score
+    inconsistencies.extend(local_incs)
+    warnings.extend(local_warns)
+
+    score = min(score, WEIGHTS["sender_score"])
+    return score, inconsistencies, warnings
+
+
+def _analyse_sender_local(sender: str, sender_domain: str) -> tuple[int, list[str], list[str]]:
+    """Display-name spoofing and suspicious local-part heuristics."""
+    score = 0
+    inconsistencies: list[str] = []
+    warnings: list[str] = []
+    sender_lower = sender.strip().lower()
 
     # Display name spoofing: quoted display name with different domain
     display_match = re.match(r'^"([^"]+)"\s*<', sender)
@@ -290,7 +489,6 @@ def _analyse_sender(
             score += 2
             warnings.append("sender local part looks randomly generated")
 
-    score = min(score, Weights["sender_score"])
     return score, inconsistencies, warnings
 
 
@@ -315,7 +513,8 @@ def _analyse_headers(
 
     # SPF
     if spf_r == "missing":
-        score += 3
+        # Absence of data is the caller's gap, not the message's behaviour:
+        # keep reporting it in warnings but do not add it to the score.
         findings.append({"check": "SPF", "result": "missing", "severity": "low"})
         warnings.append("SPF result not provided")
     elif "fail" in spf_r or "softfail" in spf_r:
@@ -329,30 +528,31 @@ def _analyse_headers(
 
     # DKIM
     if dkim_r == "missing":
-        score += 3
         findings.append({"check": "DKIM", "result": "missing", "severity": "low"})
         warnings.append("DKIM result not provided")
-    elif "fail" in dkim_r or "none" in dkim_r:
+    elif "fail" in dkim_r:
         score += 6
         findings.append({"check": "DKIM", "result": dkim_r, "severity": "high"})
     elif "neutral" in dkim_r:
         score += 2
         findings.append({"check": "DKIM", "result": dkim_r, "severity": "low"})
     else:
+        # "none" means unsigned or no policy record — absence, not failure —
+        # treated exactly as the SPF branch above treats it.
         findings.append({"check": "DKIM", "result": dkim_r, "severity": "none"})
 
     # DMARC
     if dmarc_r == "missing":
-        score += 3
         findings.append({"check": "DMARC", "result": "missing", "severity": "low"})
         warnings.append("DMARC result not provided")
-    elif "fail" in dmarc_r or "none" in dmarc_r:
+    elif "fail" in dmarc_r:
         score += 5
         findings.append({"check": "DMARC", "result": dmarc_r, "severity": "medium"})
     else:
+        # "none" is absence, not failure — same as SPF and DKIM above.
         findings.append({"check": "DMARC", "result": dmarc_r, "severity": "none"})
 
-    score = min(score, Weights["header_score"])
+    score = min(score, WEIGHTS["header_score"])
     return score, findings, warnings
 
 
@@ -373,7 +573,7 @@ def _analyse_content(subject: str, body: str) -> tuple[int, list[str], list[str]
     combined_lower = combined.lower()
 
     # Urgency keywords
-    urgency_hits = [kw for kw in UrgencyKeywords if kw in combined_lower]
+    urgency_hits = [kw for kw in URGENCY_KEYWORDS if kw in combined_lower]
     if urgency_hits:
         kw_score = min(len(urgency_hits) * 2, 10)
         score += kw_score
@@ -382,7 +582,7 @@ def _analyse_content(subject: str, body: str) -> tuple[int, list[str], list[str]
         )
 
     # Social engineering patterns
-    for technique, patterns in SocialEngineeringPatterns.items():
+    for technique, patterns in SOCIAL_ENGINEERING_PATTERNS.items():
         for pat in patterns:
             if pat.search(combined):
                 techniques.append(technique)
@@ -429,7 +629,7 @@ def _analyse_content(subject: str, body: str) -> tuple[int, list[str], list[str]
         score += 4
         indicators.append("invisible/zero-width characters detected")
 
-    score = min(score, Weights["content_score"])
+    score = min(score, WEIGHTS["content_score"])
     return score, techniques, indicators
 
 
@@ -452,7 +652,7 @@ def _analyse_attachments(attachments: list[str]) -> tuple[int, list[str], list[s
         base_exts = name_lower.split(".")
         if len(base_exts) > 2:
             final_ext = "." + base_exts[-1]
-            if final_ext in DangerousExtensions:
+            if final_ext in DANGEROUS_EXTENSIONS:
                 score += 10
                 dangerous.append(f"{name} (double extension with dangerous payload)")
                 continue
@@ -463,17 +663,22 @@ def _analyse_attachments(attachments: list[str]) -> tuple[int, list[str], list[s
         if dot_pos >= 0:
             ext = name_lower[dot_pos:]
 
-        if ext in DangerousExtensions:
+        if ext in DANGEROUS_EXTENSIONS:
             score += 8
-            dangerous.append(f"{name} (dangerous executable type)")
-        elif ext in SuspiciousExtensions:
+            label = (
+                "dangerous executable type"
+                if ext in EXECUTABLE_EXTENSIONS
+                else "macro-capable document"
+            )
+            dangerous.append(f"{name} ({label})")
+        elif ext in SUSPICIOUS_EXTENSIONS:
             score += 3
             warnings.append(f"{name} (archive type — may contain payloads)")
         elif not ext:
             score += 3
             warnings.append(f"{name} (no file extension)")
 
-    score = min(score, Weights["attachment_score"])
+    score = min(score, WEIGHTS["attachment_score"])
     return score, dangerous, warnings
 
 
@@ -493,9 +698,14 @@ def _compute_classification(
     techniques: list[str],
     indicators: list[str],
     suspicious_urls: list[dict[str, Any]],
-    dangerous_attachments: list[str],
 ) -> str:
-    """Classify the message based on all analysis signals."""
+    """Classify the message.
+
+    The bands mirror ``_compute_severity`` so the two can never contradict:
+    every 50-74 message is ``suspicious_phishing`` regardless of which
+    signals accumulated the points.  Only the critical band is refined
+    further (credential harvesting, spear phishing).
+    """
     if risk_score >= 75:
         if any("credential" in i for i in indicators):
             return "credential_harvesting"
@@ -503,11 +713,7 @@ def _compute_classification(
             return "spear_phishing"
         return "likely_phishing"
     if risk_score >= 50:
-        if techniques:
-            return "suspicious_phishing"
-        if suspicious_urls or dangerous_attachments:
-            return "suspicious_phishing"
-        return "possibly_legitimate"
+        return "suspicious_phishing"
     if risk_score >= 25:
         return "low_risk_suspicious"
     return "likely_legitimate"
@@ -603,8 +809,6 @@ def triage_email(
     spf: str | None,
     dkim: str | None,
     dmarc: str | None,
-    user_context: str | None,
-    org_context: str | None,
 ) -> dict[str, Any]:
     """Analyse a suspicious email and return a structured risk assessment.
 
@@ -615,9 +819,7 @@ def triage_email(
     url_score, suspicious_urls, url_warnings = _analyse_urls(urls)
 
     # --- Sender analysis ---
-    sender_score, sender_inconsistencies, sender_warnings = _analyse_sender(
-        sender, reply_to, body
-    )
+    sender_score, sender_inconsistencies, sender_warnings = _analyse_sender(sender, reply_to, body)
 
     # --- Header / authentication analysis ---
     header_score, auth_findings, header_warnings = _analyse_headers(spf, dkim, dmarc)
@@ -626,26 +828,20 @@ def triage_email(
     content_score, techniques, content_indicators = _analyse_content(subject, body)
 
     # --- Attachment analysis ---
-    attachment_score, dangerous_attachments, attachment_warnings = _analyse_attachments(
-        attachments
-    )
+    attachment_score, dangerous_attachments, attachment_warnings = _analyse_attachments(attachments)
 
     # --- Composite risk score ---
-    raw_score = (
-        url_score + sender_score + header_score + content_score + attachment_score
-    )
+    raw_score = url_score + sender_score + header_score + content_score + attachment_score
     risk_score = min(max(raw_score, 0), 100)
 
     # --- Derived fields ---
     severity = _compute_severity(risk_score)
     classification = _compute_classification(
-        risk_score, techniques, content_indicators, suspicious_urls, dangerous_attachments
+        risk_score, techniques, content_indicators, suspicious_urls
     )
 
     has_auth = any(f["result"] != "missing" for f in auth_findings)
-    has_auth_fail = any(
-        f["result"] in ("fail", "softfail", "none") for f in auth_findings
-    )
+    has_auth_fail = any(f["result"] in ("fail", "softfail") for f in auth_findings)
 
     confidence = _compute_confidence(
         risk_score,
@@ -661,15 +857,17 @@ def triage_email(
     # --- Evidence summary ---
     evidence_parts: list[str] = []
     if url_score:
-        evidence_parts.append(f"URL analysis scored {url_score}/{Weights['url_score']}")
+        evidence_parts.append(f"URL analysis scored {url_score}/{WEIGHTS['url_score']}")
     if sender_score:
-        evidence_parts.append(f"Sender analysis scored {sender_score}/{Weights['sender_score']}")
+        evidence_parts.append(f"Sender analysis scored {sender_score}/{WEIGHTS['sender_score']}")
     if header_score:
-        evidence_parts.append(f"Header analysis scored {header_score}/{Weights['header_score']}")
+        evidence_parts.append(f"Header analysis scored {header_score}/{WEIGHTS['header_score']}")
     if content_score:
-        evidence_parts.append(f"Content analysis scored {content_score}/{Weights['content_score']}")
+        evidence_parts.append(f"Content analysis scored {content_score}/{WEIGHTS['content_score']}")
     if attachment_score:
-        evidence_parts.append(f"Attachment analysis scored {attachment_score}/{Weights['attachment_score']}")
+        evidence_parts.append(
+            f"Attachment analysis scored {attachment_score}/{WEIGHTS['attachment_score']}"
+        )
 
     # --- Analyst summary ---
     if risk_score >= 75:
