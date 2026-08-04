@@ -82,6 +82,13 @@ they run `git diff origin/main...HEAD`, which is only correct inside it:
 You aggregate; they judge. Do not review the diff yourself and do not argue
 with a finding.
 
+`behaviour-prober` is the long pole and its runtime is unpredictable. Measured
+over three runs: 8, 20 and 81 minutes, for 18, 21 and 24 tool calls — the
+slowest run made the fewest tokens, so the variance is latency rather than
+work, and capping its turns would truncate a review without making it faster.
+Say up front that it may take a while, and spend the wait on step 5 rather
+than watching it.
+
 ## 5. Two checks before anything is written down
 
 **Check the scaffold before reporting any manifest or schema finding.** Read
