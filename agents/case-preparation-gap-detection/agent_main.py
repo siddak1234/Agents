@@ -69,12 +69,9 @@ def dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911 — each return is a 
     return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
 
-def _review_case(capability: str, payload: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0911 — same: named validation failures, not incidental branching
-    case_type = payload.get("case_type")
-    if not isinstance(case_type, str) or not case_type.strip():
-        return fail(capability, "invalid_request", "'case_type' must be a non-empty string")
-
+def _review_case(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
     documents = payload.get("documents")
+
     if not isinstance(documents, list) or not documents:
         return fail(capability, "invalid_request", "'documents' must be a non-empty array")
 
@@ -88,7 +85,7 @@ def _review_case(capability: str, payload: dict[str, Any]) -> dict[str, Any]:  #
 
     from pipeline import review_case  # noqa: PLC0415 — lazy import per rule 6, keeps describe cheap
     try:
-        result = review_case(case_type, documents)
+        result = review_case(documents)
     except Exception as exc:  # noqa: BLE001 — an envelope with the right capability is mandatory
         return fail(capability, "internal", f"{type(exc).__name__}: {exc}")
 

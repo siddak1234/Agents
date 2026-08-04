@@ -7,6 +7,7 @@ from typing import Any
 _BASE_SCORE = 100
 _PENALTY_PER_MISSING_EVIDENCE = 15
 _PENALTY_PER_TIMELINE_ISSUE = 10
+_PENALTY_PER_MISSING_DATE = 5
 _PENALTY_PER_LOW_CONFIDENCE_DOC = 5
 _LOW_CONFIDENCE_THRESHOLD = 0.5
 
@@ -18,7 +19,12 @@ def compute_readiness_score(
 ) -> int:
     score = _BASE_SCORE
     score -= _PENALTY_PER_MISSING_EVIDENCE * len(missing_evidence)
-    score -= _PENALTY_PER_TIMELINE_ISSUE * len(timeline_issues)
+
+    for issue in timeline_issues:
+        if issue["type"] == "missing_date":
+            score -= _PENALTY_PER_MISSING_DATE
+        else:
+            score -= _PENALTY_PER_TIMELINE_ISSUE
 
     low_confidence_docs = [
         c for c in classification if c["confidence"] < _LOW_CONFIDENCE_THRESHOLD

@@ -38,12 +38,9 @@ capabilities:
       model calls, no external dependencies.
     input_schema:
       type: object
-      required: [case_type, documents]
+      required: [documents]
       additionalProperties: false
       properties:
-        case_type:
-          type: string
-          description: "Category of case, e.g. 'criminal', 'civil'"
         documents:
           type: array
           minItems: 1

@@ -10,7 +10,7 @@ from scoring import compute_readiness_score
 from timeline import build_timeline
 
 
-def review_case(case_type: str, documents: list[dict[str, Any]]) -> dict[str, Any]:
+def review_case(documents: list[dict[str, Any]]) -> dict[str, Any]:
     classification = classify_documents(documents)
     timeline, timeline_issues = build_timeline(documents,classification)
     missing_evidence = check_missing_evidence(documents, classification)

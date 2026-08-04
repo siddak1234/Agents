@@ -12,18 +12,7 @@ _FIR_FILED_PATTERN = re.compile(
 )
 
 
-def _fir_filing_date(text: str) -> datetime | None:
-    """Only a date explicitly labeled as when the FIR was filed —
-    never the earliest date anywhere in the document, which previously
-    picked up unrelated dates like a date of birth and silently defeated
-    the whole conflict check."""
-    match = _FIR_FILED_PATTERN.search(text)
-    if not match:
-        return None
-    try:
-        return datetime.strptime(match.group(1), "%Y-%m-%d")  # noqa: DTZ007 — calendar dates from legal documents have no timezone
-    except ValueError:
-        return None
+
 
 
 # Evidence types that should logically be dated on or after the FIR —
@@ -42,9 +31,46 @@ _MONTH_NAME_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_NON_EVENT_DATE_MARKERS = re.compile(
+    r"\b(?:date of birth|born|dob|d\.o\.b)\b", re.IGNORECASE
+)
 
-def _extract_dates(text: str) -> list[tuple[datetime, str]]:
-    found: list[tuple[datetime, str]] = []
+
+def _is_likely_event_date(text: str, start: int) -> bool:
+    """Filters out dates that are context (like a date of birth) rather
+    than something that happened in the case's own timeline."""
+    window = text[max(0, start - 30): start]
+    return not _NON_EVENT_DATE_MARKERS.search(window)
+
+def _fir_filing_date(text: str) -> datetime | None:
+    """The date near the word 'filed', in whatever format the document uses —
+    reuses the same patterns _extract_dates already knows, instead of a
+    narrower ISO-only pattern that missed non-ISO filing dates."""
+    filed_match = re.search(r"\bfiled\b", text, re.IGNORECASE)
+    if not filed_match:
+        return None
+
+    window = text[filed_match.start(): filed_match.start() + 60]
+
+    for pattern, fmt in _DATE_PATTERNS:
+        date_match = re.search(pattern, window)
+        if date_match:
+            try:
+                return datetime.strptime(date_match.group(0), fmt)  # noqa: DTZ007 — calendar dates from legal documents have no timezone
+            except ValueError:
+                continue
+
+    month_match = _MONTH_NAME_PATTERN.search(window)
+    if month_match:
+        try:
+            return datetime.strptime(month_match.group(0), "%d %B %Y")  # noqa: DTZ007 — calendar dates from legal documents have no timezone
+        except ValueError:
+            return None
+
+    return None
+
+def _extract_dates(text: str) -> list[tuple[datetime, str, int]]:
+    found: list[tuple[datetime, str, int]] = []
 
     for pattern, fmt in _DATE_PATTERNS:
         for match in re.finditer(pattern, text):
@@ -52,20 +78,27 @@ def _extract_dates(text: str) -> list[tuple[datetime, str]]:
                 dt = datetime.strptime(match.group(0), fmt)  # noqa: DTZ007 — calendar dates from legal documents have no timezone
             except ValueError:
                 continue
-            found.append((dt, _snippet(text, match.start(), match.end())))
+            found.append((dt, _snippet(text, match.start(), match.end()), match.start()))
 
     for match in _MONTH_NAME_PATTERN.finditer(text):
         try:
             dt = datetime.strptime(match.group(0), "%d %B %Y")  # noqa: DTZ007 — calendar dates from legal documents have no timezone
         except ValueError:
             continue
-        found.append((dt, _snippet(text, match.start(), match.end())))
+        found.append((dt, _snippet(text, match.start(), match.end()), match.start()))
 
     return found
 
 def _snippet(text: str, start: int, end: int, radius: int = 40) -> str:
     lo = max(0, start - radius)
     hi = min(len(text), end + radius)
+
+    # Expand outward to the nearest whitespace so words aren't cut mid-way.
+    while lo > 0 and not text[lo].isspace():
+        lo -= 1
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+
     return text[lo:hi].strip().replace("\n", " ")
 
 
@@ -80,8 +113,10 @@ def build_timeline(
 
     for doc in documents:
         dates = _extract_dates(doc["text"])
-        dates_by_doc[doc["id"]] = [d for d, _ in dates]
-        for dt, snippet in dates:
+        dates_by_doc[doc["id"]] = [d for d, _, _ in dates]
+        for dt, snippet, start in dates:
+            if not _is_likely_event_date(doc["text"], start):
+                continue
             timeline.append({
                 "date": dt.strftime("%Y-%m-%d"),
                 "event": snippet,

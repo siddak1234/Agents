@@ -61,18 +61,12 @@ class TestProtocolErrors(unittest.TestCase):
 
 
 class TestReviewCaseValidation(unittest.TestCase):
-    def test_missing_case_type(self):
-        envelope = call({
-            "protocol": "agentcall/v1", "capability": "review_case",
-            "input": {"documents": [{"id": "d1", "text": "some text"}]},
-        })
-        self.assertFalse(envelope["ok"])
-        self.assertEqual(envelope["error"]["type"], "invalid_request")
+
 
     def test_empty_documents(self):
         envelope = call({
             "protocol": "agentcall/v1", "capability": "review_case",
-            "input": {"case_type": "criminal", "documents": []},
+            "input": {"documents": []},
         })
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
@@ -80,7 +74,7 @@ class TestReviewCaseValidation(unittest.TestCase):
     def test_document_missing_text(self):
         envelope = call({
             "protocol": "agentcall/v1", "capability": "review_case",
-            "input": {"case_type": "criminal", "documents": [{"id": "d1"}]},
+            "input": {"documents": [{"id": "d1"}]},
         })
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
@@ -91,7 +85,7 @@ class TestReviewCaseSuccess(unittest.TestCase):
         envelope = call({
             "protocol": "agentcall/v1", "capability": "review_case",
             "input": {
-                "case_type": "criminal",
+
                 "documents": [
                     {"id": "d1", "text": "FIR No. 123 dated 2024-01-05. Weapon recovered at scene."},
                     {"id": "d2", "text": "Medical examination report dated 2024-01-02."},

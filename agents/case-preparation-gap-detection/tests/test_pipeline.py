@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from classifier import classify_documents
 from evidence_rules import check_missing_evidence
 from scoring import compute_readiness_score
-from timeline import build_timeline
+from timeline import _snippet, build_timeline
 
 
 class TestClassifier(unittest.TestCase):
@@ -71,6 +71,18 @@ class TestFIRFilingDate(unittest.TestCase):
         classification = [{"id": "fir1", "type": "fir", "confidence": 0.9}]
         _, issues = build_timeline(docs, classification)
         self.assertTrue(any(i["type"] == "missing_date" for i in issues))
+
+    def test_slash_format_filing_date_is_found(self):
+        docs = [
+            {"id": "fir1", "text": "FIR filed on 10/02/2024."},
+            {"id": "pm1", "text": "Post-mortem report dated 05/02/2024."},
+        ]
+        classification = [
+            {"id": "fir1", "type": "fir", "confidence": 0.9},
+            {"id": "pm1", "type": "post_mortem_report", "confidence": 0.9},
+        ]
+        _, issues = build_timeline(docs, classification)
+        self.assertTrue(any(i["type"] == "date_conflict" for i in issues))
 
 class TestClassifierScoring(unittest.TestCase):
     def test_post_mortem_wording_is_not_misclassified_as_medical_report(self):
@@ -138,6 +150,34 @@ class TestScoring(unittest.TestCase):
         score = compute_readiness_score([], [], missing)
         self.assertEqual(score, 0)
 
+    def test_missing_date_penalizes_less_than_a_real_conflict(self):
+        missing_date_issue = [{"type": "missing_date"}]
+        conflict_issue = [{"type": "date_conflict"}]
+        score_missing = compute_readiness_score([], missing_date_issue, [])
+        score_conflict = compute_readiness_score([], conflict_issue, [])
+        self.assertGreater(score_missing, score_conflict)
+class TestTimelineEventFiltering(unittest.TestCase):
+    def test_date_of_birth_does_not_appear_as_a_timeline_event(self):
+        docs = [{
+            "id": "d1",
+            "text": "FIR filed on 2024-01-10. Accused date of birth 1985-03-02.",
+        }]
+        classification = [{"id": "d1", "type": "fir", "confidence": 0.9}]
+        timeline, _ = build_timeline(docs, classification)
+        dates_shown = {entry["date"] for entry in timeline}
+        self.assertNotIn("1985-03-02", dates_shown)
+        self.assertIn("2024-01-10", dates_shown)
 
+class TestSnippetWordBoundary(unittest.TestCase):
+    def test_snippet_does_not_cut_mid_word(self):
+        text = "Filed on 2024-03-03 the accused was arrested nearby at dawn."
+        start = text.index("2024-03-03")
+        end = start + len("2024-03-03")
+        result = _snippet(text, start, end)
+        # The character immediately before the snippet in the source text
+        # must be whitespace (or the snippet starts at position 0) — i.e.
+        # the snippet doesn't begin mid-word.
+        idx = text.find(result)
+        self.assertTrue(idx == 0 or text[idx - 1].isspace())
 if __name__ == "__main__":
     unittest.main()
