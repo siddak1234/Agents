@@ -1,0 +1,174 @@
+# Manifest for the phishing-incident-triage agent.
+# Contract: docs/AGENT_PROTOCOL.md at the repository root.
+
+protocol: agentcall/v1
+name: phishing-incident-triage
+description: >-
+  Analyses a suspicious email or message and returns a structured
+  phishing-risk assessment, including a 0-100 risk score, severity
+  classification, extracted indicators, evidence-based reasoning, and
+  recommended response actions.  Supports security analysts and IT teams
+  with consistent first-level phishing triage.  Deterministic — no model
+  calls, no network access, no credentials required.
+
+runtime:
+  type: subprocess
+  command: ["python3", "agent_main.py"]
+  test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["uv", "run", "ruff", "check", "."]
+  env:
+    inherit: []
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  - name: triage_email
+    description: >-
+      Analyse a suspicious email and return a structured phishing-risk
+      assessment with severity, indicators, and recommended actions.
+      Deterministic: no API keys required.  Fails on malformed input
+      (invalid_request) or internal errors (internal).
+    input_schema:
+      type: object
+      required: [subject, sender]
+      properties:
+        subject:
+          type: string
+          description: Email subject line.
+        sender:
+          type: string
+          description: Sender address, e.g. "alice@example.com".
+        reply_to:
+          type: string
+          description: Reply-to address if different from sender.
+        body:
+          type: string
+          description: Full email body text (plain text or HTML stripped).
+        urls:
+          type: array
+          items: { type: string }
+          description: List of URLs found in the email body or headers.
+        attachments:
+          type: array
+          items: { type: string }
+          description: List of attachment filenames.
+        spf:
+          type: string
+          description: SPF authentication result, e.g. "pass", "fail", "softfail".
+        dkim:
+          type: string
+          description: DKIM authentication result, e.g. "pass", "fail", "none".
+        dmarc:
+          type: string
+          description: DMARC authentication result, e.g. "pass", "fail", "none".
+      additionalProperties: false
+    output_schema:
+      type: object
+      required:
+        - risk_score
+        - severity
+        - classification
+        - detected_indicators
+        - suspicious_urls
+        - sender_inconsistencies
+        - social_engineering_techniques
+        - authentication_findings
+        - evidence
+        - recommended_actions
+        - analyst_summary
+        - confidence
+        - warnings
+      properties:
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Composite risk score from 0 (safe) to 100 (critical).
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Risk severity level.
+        classification:
+          type: string
+          enum:
+            - likely_legitimate
+            - low_risk_suspicious
+            - suspicious_phishing
+            - likely_phishing
+            - spear_phishing
+            - credential_harvesting
+          description: >-
+            Mirrors the severity ladder: likely_legitimate (0-24),
+            low_risk_suspicious (25-49), suspicious_phishing (50-74); the
+            critical band (75+) refines to likely_phishing, spear_phishing,
+            or credential_harvesting.
+        detected_indicators:
+          type: array
+          items: { type: string }
+          description: Specific phishing indicators found in the content.
+        suspicious_urls:
+          type: array
+          items:
+            type: object
+            properties:
+              url: { type: string }
+              reasons:
+                type: array
+                items: { type: string }
+          description: URLs flagged as suspicious with reasons.
+        sender_inconsistencies:
+          type: array
+          items: { type: string }
+          description: Mismatches between sender, reply-to, and body references.
+        social_engineering_techniques:
+          type: array
+          items: { type: string }
+          description: Detected social-engineering technique labels.
+        authentication_findings:
+          type: array
+          items:
+            type: object
+            properties:
+              check: { type: string }
+              result: { type: string }
+              severity: { type: string }
+          description: SPF, DKIM, DMARC evaluation results.
+        evidence:
+          type: array
+          items: { type: string }
+          description: Summary of scoring evidence for each analysis area.
+        recommended_actions:
+          type: array
+          items: { type: string }
+          description: Suggested response actions for the analyst.
+        analyst_summary:
+          type: string
+          description: Human-readable summary of the assessment.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence in the assessment (0.0 to 1.0).
+        warnings:
+          type: array
+          items: { type: string }
+          description: Limitations or caveats about this assessment.

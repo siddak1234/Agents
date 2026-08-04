@@ -1,0 +1,37 @@
+# Ruff configuration for this agent. Root tooling deliberately lints
+# root-owned code only (see pyproject.toml at the repository root), so this
+# is what actually keeps this agent's source clean via `agents lint`.
+
+cache-dir = ".cache/ruff"
+line-length = 100
+target-version = "py313"
+
+[lint]
+# Same selection as the repository root, minus the rules a deterministic
+# scoring engine cannot honour: PLR2004 (the whole module is a rubric of
+# deliberate magic values), and PLR0913/PLR0917 (triage_email takes one
+# input per email field).
+select = [
+    "E", "W", "F", "I", "UP", "B", "BLE", "SIM", "N", "RUF",
+    "S", "DTZ", "PL", "TRY", "PERF", "LOG",
+]
+ignore = [
+    "E501",    # line length is the formatter's job
+    "TRY003",  # long exception messages are the point — they name the file
+    "PLR2004", # magic values are the rubric, not an accident
+    "PLR0913", # too many arguments — triage_email takes one input per email field
+    "PLR0917", # same, and the caller passes everything as keywords
+]
+
+[lint.per-file-ignores]
+# Tests assert, spawn the agent, and compare against literal values on
+# purpose.
+"**/tests/*" = ["S101", "S603", "S607"]
+# The adapter breaks two rules on purpose. PLC0415: the triage engine is
+# imported inside the handler so `describe` answers from a bare environment
+# — a protocol requirement (agent_main.py RULE 6). PLR0911/PLR0912: the
+# handler validates the payload field by field and returns a typed error
+# envelope at each check; the return count is the shape of the protocol,
+# and folding the returns into nested conditionals would obscure exactly
+# the part that must stay obvious.
+"agent_main.py" = ["PLC0415", "PLR0911", "PLR0912"]
