@@ -221,6 +221,13 @@ Claude Code, and review this repository rather than doing work for a user.
 | `solution-architect` | Does it belong here, shaped this way? Should it be a capability of an existing agent instead? |
 | `engineer-reviewer` | Is the code correct, and would the tests catch a regression? |
 | `anthropic-practice` | Does it follow Anthropic's practice for agents built on Claude? |
+| `behaviour-prober` | Run it on realistic input: does it do what its manifest says? *(maintainer's `/review-pr` only — see below)* |
+
+`behaviour-prober` is not part of `/raise-pr` or the CI board, deliberately.
+Those run on a branch that may still be half-built, where probing produces
+noise; it runs on a submitted pull request, which claims to be finished. It is
+also the most expensive reviewer by a wide margin, and the other four cost
+nothing to run twice.
 
 A finding is **blocking** only when it names a real defect — an input that
 breaks it, a leaked credential, a structural choice expensive to undo.

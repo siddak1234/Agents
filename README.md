@@ -57,6 +57,7 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 |---|---|---|
 | [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
 | [`case-preparation-gap-detection`](./agents/case-preparation-gap-detection) | active | `review_case` |
+| [`phishing-incident-triage`](./agents/phishing-incident-triage) | active | `triage_email` |
 
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered

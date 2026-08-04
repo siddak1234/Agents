@@ -210,7 +210,7 @@ instead of a copy.
 ## Part 4 — Build it
 
 ```bash
-uv run agents verify
+uv run agents verify my-agent      # your agent's name
 ```
 
 Run this whenever you want to know where you stand. It runs every
@@ -219,6 +219,15 @@ first, and the list it prints is your to-do list.** When it prints
 `All 10 gates pass`, you are done. If it instead reports that some gates *did
 not run*, that is not a pass — a tool or `.git` is missing locally, and CI
 will still run them.
+
+**Name your agent.** Without a name, `verify` lints and tests *every*
+registered agent, and the last four gates then depend on building someone
+else's dependencies — `realty-lead-gen` pulls a real package tree, so a slow
+or restricted network fails two gates over code you never touched. That is not
+your build breaking and there is nothing you can fix in your folder to make it
+green. Naming your agent scopes those four to yours, which is the only part
+you are accountable for. CI does the same thing: it lints and tests only the
+agents a pull request actually changes.
 
 One more check sits outside this command, and it prints a reminder of it.
 `agents scope` compares your branch against main, which needs a base this
@@ -290,7 +299,7 @@ Run these four in order. Do not push until the first two are clean — a red
 pull request costs the maintainer a review cycle you could have spent yourself.
 
 ```bash
-uv run agents verify                             # must print: All 10 gates pass
+uv run agents verify my-agent                    # must print: All 10 gates pass
 git fetch upstream
 uv run agents scope --base upstream/main         # must print: ok    scope: my-agent
 git add -A && git commit -m "Add my-agent"
@@ -768,4 +777,4 @@ If you cannot fill in that template, go back to Part 2 — the gap is in the
 design, and Claude writing code around a gap will produce something that
 compiles and fails review.
 
-Then save each file into your folder and run `uv run agents verify`.
+Then save each file into your folder and run `uv run agents verify my-agent`.
