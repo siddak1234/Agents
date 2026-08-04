@@ -8,9 +8,11 @@ Delete the section that does not apply.
 
 ### Adding or changing an agent
 
-- [ ] `uv run agents verify` prints `All 10 gates pass` — every deterministic
-      gate CI runs on the working tree, including the secret scan and your
-      agent's own declared `runtime.lint` and `runtime.test` commands
+- [ ] `uv run agents verify <your-agent>` prints `All 10 gates pass` — every
+      deterministic gate CI runs on the working tree, including the secret scan
+      and your agent's own declared `runtime.lint` and `runtime.test` commands.
+      Name your agent: unnamed, it also lints and tests every other registered
+      agent, and their dependencies are not yours to build
 - [ ] `uv run agents scope --base origin/main` passes — the one deterministic
       gate `verify` cannot run for you, because it compares against a base.
       (The review board is the only other CI check, and it needs a token the
