@@ -139,6 +139,33 @@ class TestTimeline(unittest.TestCase):
         _, issues = build_timeline(docs, classification)
         self.assertTrue(any(i["type"] == "date_conflict" for i in issues))
 
+    def test_a_date_of_birth_does_not_become_the_documents_date(self):
+        """The event filter has to gate the conflict check, not just the display.
+
+        Applied only to the visible timeline, a date of birth still reached
+        the comparison as the document's earliest date — so a post-mortem
+        listing the deceased's DOB was reported as conflicting with the FIR
+        while the timeline beside it showed the real examination date. The
+        same response asserted two different dates for one document.
+        """
+        docs = [
+            {"id": "fir1", "text": "FIR No. 7 filed on 2024-01-10. Incident at the market."},
+            {"id": "pm1", "text": (
+                "Post-mortem report. Deceased date of birth 1970-05-01. "
+                "Post-mortem examination of the deceased conducted on 2024-01-15."
+            )},
+        ]
+        classification = [
+            {"id": "fir1", "type": "fir", "confidence": 0.9},
+            {"id": "pm1", "type": "post_mortem_report", "confidence": 0.9},
+        ]
+        timeline, issues = build_timeline(docs, classification)
+
+        assert not [i for i in issues if i["type"] == "date_conflict"], (
+            "the post-mortem is dated after the FIR; the DOB is not its date"
+        )
+        assert "1970-05-01" not in [e["date"] for e in timeline]
+
 
 class TestScoring(unittest.TestCase):
     def test_perfect_case_scores_100(self):

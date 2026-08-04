@@ -113,10 +113,14 @@ def build_timeline(
 
     for doc in documents:
         dates = _extract_dates(doc["text"])
-        dates_by_doc[doc["id"]] = [d for d, _, _ in dates]
-        for dt, snippet, start in dates:
-            if not _is_likely_event_date(doc["text"], start):
-                continue
+        # The same filter has to gate both outputs. Applied only to the
+        # visible timeline, a date of birth still reached `_find_issues` as
+        # the document's earliest date — so a post-mortem listing the
+        # deceased's DOB was reported as conflicting with the FIR while the
+        # timeline beside it showed the real examination date.
+        event_dates = [(d, s, i) for d, s, i in dates if _is_likely_event_date(doc["text"], i)]
+        dates_by_doc[doc["id"]] = [d for d, _, _ in event_dates]
+        for dt, snippet, _start in event_dates:
             timeline.append({
                 "date": dt.strftime("%Y-%m-%d"),
                 "event": snippet,
