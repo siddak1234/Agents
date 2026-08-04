@@ -1,0 +1,26 @@
+# Ruff configuration for this agent. Root tooling deliberately lints
+# root-owned code only (see pyproject.toml at the repository root), so this is
+# what actually keeps this agent's source clean via `agents lint`.
+#
+# Without this file ruff walks up and uses the root's configuration, which
+# works only while the folder sits inside this repository — the same coupling
+# the pyproject.toml beside this file removes for the dependency.
+
+cache-dir = ".cache/ruff"
+line-length = 100
+target-version = "py313"
+
+[lint]
+# Same selection as the repository root.
+select = [
+    "E", "W", "F", "I", "UP", "B", "BLE", "SIM", "N", "RUF",
+    "S", "DTZ", "PL", "TRY", "PERF", "LOG",
+]
+ignore = [
+    "E501",    # line length is the formatter's job
+    "TRY003",  # long exception messages are the point — they name the field
+]
+
+[lint.per-file-ignores]
+# Tests assert on literals and run the agent as a subprocess by design.
+"tests/*" = ["S101", "S603", "PLR2004"]
