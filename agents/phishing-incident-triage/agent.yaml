@@ -15,7 +15,7 @@ runtime:
   type: subprocess
   command: ["python3", "agent_main.py"]
   test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
-  lint: ["uv", "run", "ruff", "check", "."]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
   env:
     inherit: []
 
