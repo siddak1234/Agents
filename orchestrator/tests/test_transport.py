@@ -18,6 +18,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from orchestrator import runner as runner_mod
 from orchestrator.cli import main
@@ -67,6 +68,22 @@ json.dump(e, real)
 real.write("\\n")
 """
 
+
+def _yaml_scalar(text: str) -> str:
+    """Escape `text` for interpolation into a double-quoted YAML scalar.
+
+    A double-quoted scalar processes escape sequences, so a Windows
+    interpreter path — `C:\\Users\\...\\python.exe` — makes `\\U` the start of a
+    32-bit unicode escape and the manifest fails to parse before any test
+    runs. JSON string escaping is a subset of YAML's, so `json.dumps` produces
+    a scalar that round-trips on every platform; on POSIX it is a no-op.
+    """
+    return json.dumps(text)[1:-1]
+
+
+EXE = _yaml_scalar(sys.executable)
+
+
 CAPS = ["describe", "echo", "where", "environment", "flood", "leak_stdout", "crash", "hang"]
 
 
@@ -85,9 +102,9 @@ def stub(tmp_path: Path):
             description: Stub agent for transport tests.
             runtime:
               type: subprocess
-              command: ["{sys.executable}", "agent_main.py"]
-              test: ["{sys.executable}", "-c", "pass"]
-              lint: ["{sys.executable}", "-c", "pass"]
+              command: ["{EXE}", "agent_main.py"]
+              test: ["{EXE}", "-c", "pass"]
+              lint: ["{EXE}", "-c", "pass"]
               env:
                 inherit: [STUB_ALLOWED, STUB_PREFIXED_*]
             capabilities:
@@ -341,9 +358,7 @@ def test_agents_lint_runs_the_declared_command(stub, capsys):
 def test_an_agent_declaring_no_lint_command_fails(stub, capsys):
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace(
-            f'  lint: ["{sys.executable}", "-c", "pass"]\n', ""
-        ),
+        manifest.read_text(encoding="utf-8").replace(f'  lint: ["{EXE}", "-c", "pass"]\n', ""),
         encoding="utf-8",
     )
     assert main(["--root", str(stub.workdir.parent), "lint"]) == 1
@@ -354,9 +369,7 @@ def test_an_agent_declaring_no_test_command_fails(stub, capsys):
     """Tests nothing can run are tests nobody runs."""
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace(
-            f'  test: ["{sys.executable}", "-c", "pass"]\n', ""
-        ),
+        manifest.read_text(encoding="utf-8").replace(f'  test: ["{EXE}", "-c", "pass"]\n', ""),
         encoding="utf-8",
     )
     assert main(["--root", str(stub.workdir.parent), "test"]) == 1
@@ -384,8 +397,8 @@ def test_the_test_command_gets_the_same_environment_a_call_gets(stub, monkeypatc
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
-            f'  test: ["{sys.executable}", "-c", "pass"]',
-            f'  test: ["{sys.executable}", "probe.py"]',
+            f'  test: ["{EXE}", "-c", "pass"]',
+            f'  test: ["{EXE}", "probe.py"]',
         ),
         encoding="utf-8",
     )
@@ -513,3 +526,20 @@ def test_an_agent_cannot_emit_a_transport_error():
     assert result.error.type == "internal"
     assert "transport" in result.error.message
     assert "spoofed" in result.error.message, "the agent's own text must survive"
+
+
+def test_a_windows_interpreter_path_still_yields_a_parseable_manifest() -> None:
+    """The stub manifest has to parse whatever `sys.executable` looks like.
+
+    Interpolated raw into a double-quoted scalar, a Windows interpreter path
+    fails on `\\U`, and every test in this file would fail on Windows and
+    nowhere else — a whole platform's worth of coverage lost to a quoting bug
+    in a fixture. Reported by @ankur-15.
+    """
+    windows = r"C:\Users\a\AppData\Local\Programs\Python\Python313\python.exe"
+
+    parsed = yaml.safe_load(f'command: ["{_yaml_scalar(windows)}", "agent_main.py"]\n')
+    assert parsed["command"][0] == windows
+
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(f'command: ["{windows}", "agent_main.py"]\n')
