@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-AGENT_DIR = Path(__file__).resolve().parent.parent
-ENTRYPOINT = AGENT_DIR / "agent_main.py"
+import agentcall
+
 PROTOCOL = "agentcall/v1"
 
-
 def call(capability: str, payload: dict | None = None) -> dict:
-    """Invoke the agent as a subprocess and return its envelope."""
-
     request = json.dumps(
         {
             "protocol": PROTOCOL,
@@ -25,19 +19,7 @@ def call(capability: str, payload: dict | None = None) -> dict:
         }
     )
 
-    proc = subprocess.run(
-        [sys.executable, str(ENTRYPOINT)],
-        input=request,
-        capture_output=True,
-        text=True,
-        cwd=AGENT_DIR,
-        timeout=30,
-        check=False,
-    )
-
-    assert proc.returncode == 0, f"Agent exited with {proc.returncode}\n{proc.stderr}"
-
-    return json.loads(proc.stdout)
+    return agentcall._dispatch(request)
 
 
 class TestContract(unittest.TestCase):
@@ -63,8 +45,8 @@ class TestContract(unittest.TestCase):
 class TestMaintenancePlanner(unittest.TestCase):
     """Tests for the maintenance planning capability."""
 
-    @patch("planner.Anthropic")
-    def test_generates_plan(self, mock_anthropic):
+    @patch("planner.call_llm")
+    def test_generates_plan(self, mock_call_llm):
         fake_response = MagicMock()
         fake_response.content = [
             MagicMock(
@@ -80,9 +62,12 @@ class TestMaintenancePlanner(unittest.TestCase):
             )
         ]
 
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = fake_response
-        mock_anthropic.return_value = mock_client
+        fake_response.usage = MagicMock(
+            input_tokens=100,
+            output_tokens=50,
+        )
+
+        mock_call_llm.return_value = fake_response
 
         payload = {
             "work_orders": [],
@@ -93,19 +78,14 @@ class TestMaintenancePlanner(unittest.TestCase):
 
         envelope = call("generate_maintenance_plan", payload)
 
-        import os
+        self.assertTrue(envelope["ok"],envelope["error"])
 
-        if os.getenv("ANTHROPIC_API_KEY"):
-            self.assertTrue(envelope["ok"], envelope["error"])
-
-            self.assertIn("plan_summary", envelope["output"])
-            self.assertIn("scheduled_tasks", envelope["output"])
-            self.assertIn("deferred_tasks", envelope["output"])
-            self.assertIn("risks", envelope["output"])
-            self.assertIn("recommendations", envelope["output"])
-        else:
-            self.assertFalse(envelope["ok"])
-            self.assertEqual(envelope["error"]["type"], "unavailable")
+        self.assertIn("plan_summary", envelope["output"])
+        self.assertIn("scheduled_tasks", envelope["output"])
+        self.assertIn("deferred_tasks", envelope["output"])
+        self.assertIn("risks", envelope["output"])
+        self.assertIn("recommendations", envelope["output"])
+        
 
     def test_missing_required_field(self) -> None:
         payload = {

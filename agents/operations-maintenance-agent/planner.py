@@ -6,10 +6,10 @@ from prompts import SYSTEM_PROMPT
 
 import os
 
-from anthropic import Anthropic
+def call_llm(user_prompt: str):
+    """Call Claude and return the raw response."""
 
-def generate_maintenance_plan(payload:dict[str,Any]) -> dict[str,Any]:
-    """Takes in the operational constraints and generates optimized plan to maximize production."""
+    from anthropic import Anthropic
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
 
@@ -17,6 +17,21 @@ def generate_maintenance_plan(payload:dict[str,Any]) -> dict[str,Any]:
         raise RuntimeError("ANTHROPIC_API_KEY not configured")
 
     client = Anthropic(api_key=api_key)
+
+    return client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": user_prompt,
+            }
+        ],
+    )
+
+def generate_maintenance_plan(payload:dict[str,Any]) -> dict[str,Any]:
+    """Takes in the operational constraints and generates optimized plan to maximize production."""
 
     required_fields = [
         "work_orders" ,
@@ -43,21 +58,33 @@ def generate_maintenance_plan(payload:dict[str,Any]) -> dict[str,Any]:
         work_orders,equipment_status,technicians,production_constraints,spare_parts,shift_details
     )
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role" : "user",
-                "content" : user_prompt
-            }
-        ]
-    )
+    response = call_llm(user_prompt)
 
     try:
         result = json.loads(response.content[0].text)
-        return result
+
+        required_output_fields = [
+            "plan_summary",
+            "scheduled_tasks",
+            "deferred_tasks",
+            "risks",
+            "recommendations",
+        ]
+                
+        for field in required_output_fields:
+    
+            if field not in result:
+    
+                raise ValueError(f"Required field missing : {field}")
+            
+        return {
+            "plan": result,
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "cost_micros": 0,
+            },
+        }
 
     except json.JSONDecodeError:
         raise ValueError("LLM did not return valid JSON. Please ensure the prompt requests JSON output.")
