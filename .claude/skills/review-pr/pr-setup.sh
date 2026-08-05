@@ -126,6 +126,7 @@ import json,os; print(json.dumps({"label":os.environ["LABEL"],
     fi
     run meta gh pr view "$n" --json \
       files,author,body,title,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,isCrossRepository
+    mergestate "$n"
     conflicts "$n"
   } | python3 -c '
 import json,sys
@@ -137,7 +138,43 @@ for line in sys.stdin:
 print(json.dumps(res, indent=2))'
 }
 
+# Does this pull request merge into main as it stands?
+#
+# Separate from `conflicts` because they answer different questions, and the
+# difference is not obvious under pressure: a branch can be `[]` there — no
+# other open pull request would break it — while being unmergeable here. Both
+# facts were already fetched into `meta`, where an unlabelled field in a large
+# blob went unread; a review shipped without noticing the branch could not
+# merge. Promoted to its own key so it is reported rather than noticed.
+# GitHub computes mergeability lazily, so the first read after a push is
+# `UNKNOWN` — a real answer arrives a second or two later. Asking once and
+# reporting `clean: false` would be right by accident and unreadable on
+# purpose: "not computed yet" and "conflicts with main" are different facts,
+# and a reviewer who cannot tell them apart learns to ignore both. Poll until
+# it settles, then say which one it is.
+mergestate() {
+  local n=$1 out mergeable=UNKNOWN i
+  for i in 1 2 3 4 5 6; do
+    out=$(gh pr view "$n" --json mergeable,mergeStateStatus) || out='{}'
+    mergeable=$(OUT="$out" python3 -c \
+      'import json,os; print(json.loads(os.environ["OUT"] or "{}").get("mergeable") or "UNKNOWN")')
+    [ "$mergeable" != "UNKNOWN" ] && break
+    sleep 2
+  done
+  OUT="$out" python3 -c '
+import json, os
+d = json.loads(os.environ["OUT"] or "{}")
+mergeable = d.get("mergeable")
+print(json.dumps({"label": "merge", "exit": 0, "output": {
+    "mergeable": mergeable,
+    "state": d.get("mergeStateStatus"),
+    # Tri-state on purpose. `false` means GitHub says this does not merge;
+    # `null` means it would not say, which is a reason to look, not to assume.
+    "clean": None if mergeable in (None, "UNKNOWN") else mergeable == "MERGEABLE"}}))'
+}
+
 # Would landing another open pull request first put this one in conflict?
+# Not the same as "does it merge today" — see `mergestate`.
 conflicts() {
   local n=$1 mine others merged tmp
   mine=$(git -C "$ROOT" rev-parse "$(ref_for "$n")")
@@ -166,7 +203,7 @@ PY
 )
   fi
   OUT="$out" python3 -c '
-import json,os; print(json.dumps({"label":"conflicts","exit":0,"output":json.loads(os.environ["OUT"])}))'
+import json,os; print(json.dumps({"label":"conflicts_with_open_prs","exit":0,"output":json.loads(os.environ["OUT"])}))'
 }
 
 # --- teardown --------------------------------------------------------------
