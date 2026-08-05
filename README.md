@@ -55,7 +55,6 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 
 | Agent | Status | Capabilities |
 |---|---|---|
-| [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
 | [`patient-appointment-agent`](./agents/patient-appointment-agent) | active | `list_slots`, `book_appointment`, `cancel_appointment`, `chat` |
 
 This table is maintained by hand (and by `agents new`, which adds a row).

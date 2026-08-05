@@ -37,7 +37,9 @@ TEMPLATE_SRC = Path(__file__).resolve().parents[2] / TEMPLATE_DIR
 
 #: Read from the template so an edit there cannot silently invalidate the
 #: description-similarity tests below.
-TEMPLATE_DESCRIPTION: str = yaml.safe_load((TEMPLATE_SRC / "agent.yaml").read_text())["description"]
+TEMPLATE_DESCRIPTION: str = yaml.safe_load(
+    (TEMPLATE_SRC / "agent.yaml").read_text(encoding="utf-8")
+)["description"]
 
 
 def _repo(tmp_path: Path) -> Path:
