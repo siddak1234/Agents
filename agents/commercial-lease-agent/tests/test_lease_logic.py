@@ -46,3 +46,31 @@ def test_clean_clause_recomputes_page_and_clamps_confidence():
     cleaned = lease_logic._clean_clause(raw, pages)
     assert cleaned["page_number"] == 2
     assert cleaned["confidence_score"] == 1.0
+
+
+def test_chunk_ranges_splits_long_document():
+    # a 250-page lease at the default 20-page chunk size -> 13 chunks, last one partial
+    ranges = lease_logic._chunk_ranges(250, 20)
+    assert len(ranges) == 13
+    assert ranges[0] == (0, 20)
+    assert ranges[-1] == (240, 250)
+
+
+def test_chunk_ranges_short_document_is_one_chunk():
+    assert lease_logic._chunk_ranges(5, 20) == [(0, 5)]
+
+
+def test_positive_int_falls_back_on_invalid_or_missing():
+    assert lease_logic._positive_int(None, 20) == 20
+    assert lease_logic._positive_int("not-a-number", 20) == 20
+    assert lease_logic._positive_int("-5", 20) == 20
+    assert lease_logic._positive_int("7", 20) == 7
+
+
+def test_estimate_cost_micros_known_model():
+    # 1,000,000 input tokens @ $2/MTok + 1,000,000 output tokens @ $10/MTok = $12
+    assert lease_logic._estimate_cost_micros("claude-sonnet-5", 1_000_000, 1_000_000) == 12_000_000
+
+
+def test_estimate_cost_micros_unknown_model_is_zero_not_fabricated():
+    assert lease_logic._estimate_cost_micros("some-future-model-nobody-priced-yet", 1000, 1000) == 0

@@ -16,7 +16,12 @@ runtime:
   test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-q"]
   lint: ["uv", "run", "python", "-m", "compileall", "-q", "."]
   env:
-    inherit: ["ANTHROPIC_API_KEY"]
+    inherit:
+      - "ANTHROPIC_API_KEY"
+      - "LEASE_AGENT_MODEL"
+      - "LEASE_AGENT_CHUNK_SIZE"
+      - "LEASE_AGENT_INPUT_PRICE_PER_MTOK"
+      - "LEASE_AGENT_OUTPUT_PRICE_PER_MTOK"
 
 capabilities:
   - name: describe
