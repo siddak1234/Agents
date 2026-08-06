@@ -1,0 +1,82 @@
+protocol: agentcall/v1
+name: commercial-lease-agent
+description: >-
+  Extracts renewal, financial, and maintenance clauses from commercial lease
+  documents into structured JSON, with the exact source quote, the physical
+  page number, and a confidence score for each — replacing an hours-long
+  manual read-through with a single call. Also calculates a notice deadline
+  from a lease end date and a notice period, on its own or as a follow-up to
+  extraction. Called by an orchestrator or script, not directly by a person;
+  it does not read PDF files itself, render output for a human, or store any
+  lease it has seen.
+
+runtime:
+  type: subprocess
+  command: ["uv", "run", "python", "agent_main.py"]
+  test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-q"]
+  lint: ["uv", "run", "python", "-m", "compileall", "-q", "."]
+  env:
+    inherit: ["ANTHROPIC_API_KEY"]
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities: { type: array, items: { type: object } }
+
+  - name: extract_clauses
+    description: >-
+      Extract renewal, financial, and maintenance clauses from a lease given
+      as an array of per-page text. Uses a language model with a tool schema
+      for structured output. Returns each clause's type, exact source quote,
+      physical page number, and a confidence score.
+    input_schema:
+      type: object
+      required: [lease_pages]
+      properties:
+        lease_pages:
+          type: array
+          items: { type: string }
+          description: Raw text of each physical page, in order; index 0 is page 1.
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [clauses]
+      properties:
+        clauses:
+          type: array
+          items:
+            type: object
+            required: [clause_type, text_quote, page_number, confidence_score]
+            properties:
+              clause_type: { type: string, enum: [renewal, financial, maintenance] }
+              text_quote: { type: string }
+              page_number: { type: integer }
+              confidence_score: { type: number }
+
+  - name: calculate_deadline
+    description: >-
+      Calculate the notice deadline given a lease end date and a notice
+      period in days. Pure date arithmetic, no external dependency, callable
+      on its own.
+    input_schema:
+      type: object
+      required: [lease_end_date, notice_period_days]
+      properties:
+        lease_end_date: { type: string, description: "YYYY-MM-DD" }
+        notice_period_days: { type: integer }
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [deadline_date]
+      properties:
+        deadline_date: { type: string, description: "YYYY-MM-DD" }

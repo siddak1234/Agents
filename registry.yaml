@@ -20,3 +20,4 @@ agents:
   - path: agents/phishing-incident-triage
   - path: agents/operations-maintenance-agent
   - path: agents/investment-due-diligence
+  - path: agents/commercial-lease-agent
