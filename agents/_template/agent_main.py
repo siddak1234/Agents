@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """A minimal agentcall/v1 agent. Copy this folder to start a new agent.
 
+TODO(new agent): rewrite this docstring for your agent. Every sentence below
+is about the template and stops being true the moment you add a dependency —
+"standard library only" first of all. It is the one piece of prose in this
+folder a reader takes at face value, and on the last agent added here it
+survived two rounds of review, still describing a file it no longer matched.
+
 Standard library only, on purpose: you can run it right now, and it shows the
 whole contract in one screen. A real agent brings its own dependencies (see
 `realty-lead-gen`), but nothing here requires them.
