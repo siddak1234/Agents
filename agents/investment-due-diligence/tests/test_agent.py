@@ -158,6 +158,21 @@ class TestPropertyIntelligence(unittest.TestCase):
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 
+    def test_negative_asking_price_is_rejected(self):
+        # agent.yaml declares exclusiveMinimum: 0; financial_analysis already
+        # enforces it — property_intelligence must too.
+        envelope = call(
+            "property_intelligence",
+            {
+                "address": "Some Apartment, Whitefield, Bangalore",
+                "asking_price_inr": -100,
+                "area_sqft": 1000,
+            },
+        )
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["type"], "invalid_request")
+        self.assertIn("asking_price_inr", envelope["error"]["message"])
+
 
 class TestFlexibleInput(unittest.TestCase):
     """Nothing but the bare minimum should be *required* -- everything
@@ -190,26 +205,22 @@ class TestFlexibleInput(unittest.TestCase):
         envelope = call(
             "investment_recommendation",
             {"risk_assessment": {"overall_risk": "Medium", "identified_risks": []}},
-            env_overrides={"GROQ_API_KEY": "test-key-not-real"},
         )
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
+        self.assertIn("GROQ_API_KEY is not configured", envelope["error"]["message"])
 
     def test_recommendation_accepts_shortcut_scores_without_raw_objects(self):
         envelope = call(
             "investment_recommendation",
             {"financial_score": 7.5, "location_score": 8.0, "overall_risk": "Low"},
-            env_overrides={"GROQ_API_KEY": "test-key-not-real"},
         )
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
+        self.assertIn("GROQ_API_KEY is not configured", envelope["error"]["message"])
 
     def test_recommendation_rejects_completely_empty_evidence(self):
-        envelope = call(
-            "investment_recommendation",
-            {},
-            env_overrides={"GROQ_API_KEY": "test-key-not-real"},
-        )
+        envelope = call("investment_recommendation", {})
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 
@@ -246,12 +257,13 @@ class TestMissingCredentials(unittest.TestCase):
                 "financial_score": 8.4,
                 "location_score": 8.9,
                 "overall_risk": "Medium",
-                "property_profile": {"builder": "Prestige Group", "property_type": "Apartment"},
+                "property_intelligence": {"builder": "Prestige Group", "property_type": "Apartment"},
             },
         )
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
         self.assertFalse(envelope["error"]["retryable"])
+        self.assertIn("GROQ_API_KEY is not configured", envelope["error"]["message"])
 
 
 class TestInputValidation(unittest.TestCase):
@@ -268,14 +280,14 @@ class TestInputValidation(unittest.TestCase):
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 
-    def test_recommendation_rejects_non_object_property_profile(self):
+    def test_recommendation_rejects_non_object_property_intelligence(self):
         envelope = call(
             "investment_recommendation",
             {
                 "financial_score": 8.4,
                 "location_score": 8.9,
                 "overall_risk": "Medium",
-                "property_profile": "not-an-object",
+                "property_intelligence": "not-an-object",
             },
         )
         self.assertFalse(envelope["ok"])
@@ -288,9 +300,8 @@ class TestInputValidation(unittest.TestCase):
                 "financial_score": 8.4,
                 "location_score": 8.9,
                 "overall_risk": "Catastrophic",
-                "property_profile": {},
+                "property_intelligence": {},
             },
-            env_overrides={"GROQ_API_KEY": "test-key-not-real"},
         )
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")

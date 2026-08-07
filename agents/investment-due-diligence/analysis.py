@@ -14,6 +14,7 @@ import re
 import statistics
 from typing import Any
 
+from budget import DeadlineBudget
 from clients import geocode, tavily_search
 
 # ---------------------------------------------------------------------------
@@ -30,6 +31,7 @@ def build_property_profile(
     address: str | None,
     asking_price_inr: float | None,
     area_sqft: float | None,
+    budget: DeadlineBudget | None = None,
 ) -> dict[str, Any]:
     if not property_url and not address:
         raise ValueError("either 'property_url' or 'address' is required to identify a property")
@@ -45,7 +47,8 @@ def build_property_profile(
             # Best-effort corroboration only -- a missing key or a search
             # miss doesn't make the property unidentifiable, so fall back
             # to what the caller told us instead of failing the request.
-            results = tavily_search(f"{query} builder property details")
+            timeout = budget.for_call(1) if budget is not None else 12.0
+            results = tavily_search(f"{query} builder property details", timeout=timeout)
         except Exception:
             results = []
 
@@ -57,9 +60,12 @@ def build_property_profile(
     if not location:
         raise ValueError("could not determine a location for this property; provide 'address'")
 
-    price_per_sqft = None
-    if asking_price_inr and area_sqft:
-        price_per_sqft = round(asking_price_inr / area_sqft, 2)
+    # Same exclusiveMinimum: 0 rule as financial_analysis / agent.yaml — a
+    # negative asking price used to slip through and yield a negative
+    # price_per_sqft because this path only checked truthiness.
+    price_per_sqft = _resolve_price_per_sqft(
+        price_per_sqft=None, asking_price_inr=asking_price_inr, area_sqft=area_sqft
+    )
 
     property_id = "prop_" + hashlib.sha1((property_url or address or "").encode("utf-8")).hexdigest()[:10]
 
@@ -85,7 +91,7 @@ def _extract_builder(address: str, results: list[dict[str, Any]]) -> str | None:
     # In Indian listings the builder/project name is often the first
     # comma-separated segment of the address, e.g. "Prestige Lakeside
     # Habitat, Whitefield, Bangalore".
-    first_segment = address.split(",")[0].strip() if address else ""
+    first_segment = address.split(",", maxsplit=1)[0].strip() if address else ""
     if first_segment and len(first_segment.split()) <= 6:
         return first_segment
     for result in results:
@@ -129,12 +135,16 @@ def analyze_financials(
     price_per_sqft: float | None = None,
     asking_price_inr: float | None = None,
     area_sqft: float | None = None,
+    budget: DeadlineBudget | None = None,
 ) -> dict[str, Any]:
     resolved_price_per_sqft = _resolve_price_per_sqft(
         price_per_sqft=price_per_sqft, asking_price_inr=asking_price_inr, area_sqft=area_sqft
     )
 
-    comparable_results = tavily_search(f"{location} property price per sqft average")
+    timeout_a = budget.for_call(2) if budget is not None else 12.0
+    comparable_results = tavily_search(
+        f"{location} property price per sqft average", timeout=timeout_a
+    )
     comparable_prices = _extract_prices_per_sqft(comparable_results)
     market_avg = statistics.median(comparable_prices) if comparable_prices else resolved_price_per_sqft
 
@@ -147,7 +157,10 @@ def analyze_financials(
         premium_percent = None
         market_value = None
 
-    rental_results = tavily_search(f"{location} monthly rental yield apartment")
+    timeout_b = budget.for_call(1) if budget is not None else 12.0
+    rental_results = tavily_search(
+        f"{location} monthly rental yield apartment", timeout=timeout_b
+    )
     rental_yield = _extract_rental_yield(rental_results) or DEFAULT_RENTAL_YIELD_PERCENT
 
     price_penalty = max(premium_percent, 0) if premium_percent is not None else 0
@@ -237,17 +250,25 @@ CONNECTIVITY_KEYWORDS = ("metro", "highway", "airport", "railway", "bus")
 AMENITY_KEYWORDS = ("school", "hospital", "mall", "market", "restaurant")
 
 
-def analyze_location(*, location: str) -> dict[str, Any]:
+def analyze_location(*, location: str, budget: DeadlineBudget | None = None) -> dict[str, Any]:
     if not location or not location.strip():
         raise ValueError("'location' must be a non-empty string")
 
     # Best-effort corroboration that the locality is a real, resolvable
     # place. No key required (OpenStreetMap/Nominatim), and a miss never
     # fails the capability -- it just means coordinates come back null.
-    coordinates = geocode(location)
+    # Three outbound calls share the deadline: geocode + two Tavily searches.
+    geo_timeout = budget.for_call(3) if budget is not None else 8.0
+    coordinates = geocode(location, timeout=geo_timeout)
 
-    infra_results = tavily_search(f"{location} upcoming infrastructure metro road development")
-    amenity_results = tavily_search(f"{location} connectivity schools hospitals malls")
+    infra_timeout = budget.for_call(2) if budget is not None else 12.0
+    infra_results = tavily_search(
+        f"{location} upcoming infrastructure metro road development", timeout=infra_timeout
+    )
+    amenity_timeout = budget.for_call(1) if budget is not None else 12.0
+    amenity_results = tavily_search(
+        f"{location} connectivity schools hospitals malls", timeout=amenity_timeout
+    )
 
     planned_infrastructure = _extract_infrastructure(infra_results)
     connectivity_score = _keyword_score(amenity_results, CONNECTIVITY_KEYWORDS)
@@ -311,7 +332,13 @@ MARKET_SLOWDOWN_KEYWORDS = ("slowdown", "oversupply", "decline", "stagnant")
 RISK_RANK = {"Low": 0, "Medium": 1, "High": 2}
 
 
-def assess_risk(*, builder: str | None = None, location: str, property_type: str | None = None) -> dict[str, Any]:
+def assess_risk(
+    *,
+    builder: str | None = None,
+    location: str,
+    property_type: str | None = None,
+    budget: DeadlineBudget | None = None,
+) -> dict[str, Any]:
     if not location or not location.strip():
         raise ValueError("'location' is required")
 
@@ -319,13 +346,20 @@ def assess_risk(*, builder: str | None = None, location: str, property_type: str
     if not property_type:
         identified_risks.append("property type not supplied; type-specific risk factors were not checked")
 
+    # Three Tavily searches share the deadline (builder + environment + market).
     if builder:
-        builder_results = tavily_search(f"{builder} builder complaints litigation reviews")
+        builder_results = tavily_search(
+            f"{builder} builder complaints litigation reviews",
+            timeout=budget.for_call(3) if budget is not None else 12.0,
+        )
     else:
         # Still confirms the key is configured even with no builder to
         # search for, so this fails `unavailable` (not a false "Low
         # risk") when TAVILY_API_KEY is missing.
-        tavily_search(f"{location} real estate builder track record")
+        tavily_search(
+            f"{location} real estate builder track record",
+            timeout=budget.for_call(3) if budget is not None else 12.0,
+        )
         builder_results = []
 
     builder_hits = _count_keyword_hits(builder_results, NEGATIVE_BUILDER_KEYWORDS)
@@ -337,13 +371,19 @@ def assess_risk(*, builder: str | None = None, location: str, property_type: str
         if builder_hits:
             identified_risks.append(f"{builder_hits} negative signal(s) found for the builder in public search results")
 
-    env_results = tavily_search(f"{location} flooding environmental risk")
+    env_results = tavily_search(
+        f"{location} flooding environmental risk",
+        timeout=budget.for_call(2) if budget is not None else 12.0,
+    )
     flood_hits = _count_keyword_hits(env_results, FLOOD_KEYWORDS)
     environmental_risk = "High" if flood_hits >= 2 else "Medium" if flood_hits >= 1 else "Low"
     if flood_hits:
         identified_risks.append("locality has reported flooding or waterlogging history")
 
-    market_results = tavily_search(f"{location} real estate market slowdown oversupply")
+    market_results = tavily_search(
+        f"{location} real estate market slowdown oversupply",
+        timeout=budget.for_call(1) if budget is not None else 12.0,
+    )
     market_hits = _count_keyword_hits(market_results, MARKET_SLOWDOWN_KEYWORDS)
     market_risk = "High" if market_hits >= 2 else "Medium" if market_hits >= 1 else "Low"
     if market_hits:

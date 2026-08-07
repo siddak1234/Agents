@@ -21,7 +21,10 @@ from __future__ import annotations
 import json
 import sys
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+
+from budget import DeadlineBudget
 
 PROTOCOL = "agentcall/v1"
 AGENT_NAME = "investment-due-diligence"
@@ -79,7 +82,8 @@ def dispatch(raw: str) -> dict[str, Any]:
         return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
     try:
-        output, usage = handler(payload)
+        budget = DeadlineBudget.from_deadline_ms(request.get("deadline_ms"))
+        output, usage = handler(payload, budget)
     except ValueError as exc:
         return fail(capability, "invalid_request", str(exc))
     except TimeoutError as exc:
@@ -99,7 +103,9 @@ def dispatch(raw: str) -> dict[str, Any]:
 # entirely outside this file.
 # ---------------------------------------------------------------------------
 
-Handler = Callable[[dict[str, Any]], "tuple[dict[str, Any], dict[str, int]]"]
+Handler = Callable[
+    [dict[str, Any], DeadlineBudget], "tuple[dict[str, Any], dict[str, int]]"
+]
 
 
 def _require_str(payload: dict[str, Any], key: str, *, required: bool = True) -> str | None:
@@ -133,8 +139,10 @@ def _require_object(payload: dict[str, Any], key: str) -> dict[str, Any] | None:
     return value
 
 
-def _handle_describe(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
-    del payload
+def _handle_describe(
+    payload: dict[str, Any], budget: DeadlineBudget
+) -> tuple[dict[str, Any], dict[str, int]]:
+    del payload, budget
     output = {
         "name": AGENT_NAME,
         "protocol": PROTOCOL,
@@ -143,7 +151,9 @@ def _handle_describe(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str,
     return output, zero_usage()
 
 
-def _handle_property_intelligence(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+def _handle_property_intelligence(
+    payload: dict[str, Any], budget: DeadlineBudget
+) -> tuple[dict[str, Any], dict[str, int]]:
     from analysis import build_property_profile  # RULE 6: imported only when this capability runs
 
     output = build_property_profile(
@@ -151,11 +161,14 @@ def _handle_property_intelligence(payload: dict[str, Any]) -> tuple[dict[str, An
         address=_require_str(payload, "address", required=False),
         asking_price_inr=_require_number(payload, "asking_price_inr", required=False),
         area_sqft=_require_number(payload, "area_sqft", required=False),
+        budget=budget,
     )
     return output, zero_usage()
 
 
-def _handle_financial_analysis(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+def _handle_financial_analysis(
+    payload: dict[str, Any], budget: DeadlineBudget
+) -> tuple[dict[str, Any], dict[str, int]]:
     from analysis import analyze_financials
 
     output = analyze_financials(
@@ -163,40 +176,51 @@ def _handle_financial_analysis(payload: dict[str, Any]) -> tuple[dict[str, Any],
         price_per_sqft=_require_number(payload, "price_per_sqft", required=False),
         asking_price_inr=_require_number(payload, "asking_price_inr", required=False),
         area_sqft=_require_number(payload, "area_sqft", required=False),
+        budget=budget,
     )
     return output, zero_usage()
 
 
-def _handle_location_infrastructure_analysis(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+def _handle_location_infrastructure_analysis(
+    payload: dict[str, Any], budget: DeadlineBudget
+) -> tuple[dict[str, Any], dict[str, int]]:
     from analysis import analyze_location
 
-    output = analyze_location(location=_require_str(payload, "location"))
+    output = analyze_location(location=_require_str(payload, "location"), budget=budget)
     return output, zero_usage()
 
 
-def _handle_risk_assessment(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+def _handle_risk_assessment(
+    payload: dict[str, Any], budget: DeadlineBudget
+) -> tuple[dict[str, Any], dict[str, int]]:
     from analysis import assess_risk
 
     output = assess_risk(
         builder=_require_str(payload, "builder", required=False),
         location=_require_str(payload, "location"),
         property_type=_require_str(payload, "property_type", required=False),
+        budget=budget,
     )
     return output, zero_usage()
 
 
-def _handle_investment_recommendation(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+def _handle_investment_recommendation(
+    payload: dict[str, Any], budget: DeadlineBudget
+) -> tuple[dict[str, Any], dict[str, int]]:
     from recommendation import recommend
 
     output, usage = recommend(
-        property_profile=_require_object(payload, "property_profile"),
+        property_intelligence=_require_object(payload, "property_intelligence"),
         financial_analysis=_require_object(payload, "financial_analysis"),
-        location_analysis=_require_object(payload, "location_analysis"),
+        location_infrastructure_analysis=_require_object(
+            payload, "location_infrastructure_analysis"
+        ),
         risk_assessment=_require_object(payload, "risk_assessment"),
         financial_score=_require_number(payload, "financial_score", required=False),
         location_score=_require_number(payload, "location_score", required=False),
         overall_risk=_require_str(payload, "overall_risk", required=False),
         asking_price_inr=_require_number(payload, "asking_price_inr", required=False),
+        budget=budget,
     )
     return output, usage
 

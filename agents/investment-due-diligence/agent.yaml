@@ -1,20 +1,20 @@
 protocol: agentcall/v1
 name: investment-due-diligence
 description: >-
-  Evaluates residential real estate investment opportunities for individual
-  investors and prospective home buyers. Given a property's basic details
-  (address or listing URL, asking price, area), it builds a verified
-  property profile, analyzes financial attractiveness, assesses the
-  location's infrastructure and growth outlook, identifies risks, and
-  returns an evidence-backed BUY / NEGOTIATE / REJECT recommendation with a
-  confidence score. It does not place bids, file paperwork, or evaluate
-  commercial or non-residential property.
+  Evaluates residential real estate investment opportunities for the Indian
+  residential market (prices in INR) for individual investors and prospective
+  home buyers. Given a property's basic details (address or listing URL,
+  asking price, area), it builds a verified property profile, analyzes
+  financial attractiveness, assesses the location's infrastructure and growth
+  outlook, identifies risks, and returns an evidence-backed BUY / NEGOTIATE /
+  REJECT recommendation with a confidence score. It does not place bids, file
+  paperwork, or evaluate commercial or non-residential property.
 
 runtime:
   type: subprocess
   command: ["python3", "agent_main.py"]
   test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
-  lint: ["python3", "-m", "compileall", "-q", "."]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
   env:
     inherit: ["GROQ_API_KEY", "TAVILY_API_KEY"]
 
@@ -31,7 +31,14 @@ capabilities:
       properties:
         name: { type: string }
         protocol: { type: string }
-        capabilities: { type: array, items: { type: object } }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
 
   - name: property_intelligence
     description: >-
@@ -151,19 +158,19 @@ capabilities:
       BUY / NEGOTIATE / REJECT recommendation with a confidence score,
       using a Groq-hosted LLM for reasoning. Nothing is strictly
       required: pass the raw output objects from any of the other
-      capabilities (financial_analysis, location_analysis,
-      risk_assessment, property_profile) and/or the convenience
-      shortcuts (financial_score, location_score, overall_risk) for
-      whichever ones you have -- the model reasons over whatever subset
-      is present and calls out what's missing. Fails invalid_request if
-      no evidence at all is supplied. Fails unavailable if GROQ_API_KEY
-      is unset or Groq is unreachable.
+      capabilities (property_intelligence, financial_analysis,
+      location_infrastructure_analysis, risk_assessment) and/or the
+      convenience shortcuts (financial_score, location_score,
+      overall_risk) for whichever ones you have -- the model reasons
+      over whatever subset is present and calls out what's missing.
+      Fails invalid_request if no evidence at all is supplied. Fails
+      unavailable if GROQ_API_KEY is unset or Groq is unreachable.
     input_schema:
       type: object
       properties:
-        property_profile: { type: object }
+        property_intelligence: { type: object }
         financial_analysis: { type: object }
-        location_analysis: { type: object }
+        location_infrastructure_analysis: { type: object }
         risk_assessment: { type: object }
         financial_score: { type: number }
         location_score: { type: number }

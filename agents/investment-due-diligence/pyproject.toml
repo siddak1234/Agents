@@ -1,0 +1,11 @@
+# This agent's own tooling, so its lint does not borrow the root project's.
+# Ruff config lives in ruff.toml beside this file; only the dependency is here.
+[project]
+name = "investment-due-diligence"
+version = "0.1.0"
+description = "Indian residential real-estate investment due diligence over agentcall/v1."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff>=0.14"]

@@ -1,12 +1,12 @@
 # investment-due-diligence
 
-Evaluates residential real estate investment opportunities for individual
-investors and prospective home buyers. Given a property's basic details
-(address or listing URL, asking price, area), it builds a verified
-property profile, analyzes financial attractiveness, assesses the
-location's infrastructure and growth outlook, identifies risks, and
-returns an evidence-backed **BUY / NEGOTIATE / REJECT** recommendation
-with a confidence score.
+Evaluates residential real estate investment opportunities for the Indian
+residential market (prices in INR) for individual investors and prospective
+home buyers. Given a property's basic details (address or listing URL, asking
+price, area), it builds a verified property profile, analyzes financial
+attractiveness, assesses the location's infrastructure and growth outlook,
+identifies risks, and returns an evidence-backed **BUY / NEGOTIATE / REJECT**
+recommendation with a confidence score.
 
 It will not: evaluate commercial or non-residential property, place a
 bid, file paperwork, or give legal advice.
@@ -14,15 +14,17 @@ bid, file paperwork, or give legal advice.
 ## Project layout
 
 ```
-due-diligence/
+investment-due-diligence/
 ├── agent_main.py     # protocol adapter only -- parse, validate, dispatch, format
 ├── agent.yaml         # manifest
 ├── README.md
 ├── analysis.py        # capabilities 1-4 (property, financial, location, risk)
 ├── recommendation.py  # capability 5 (LLM synthesis)
 ├── clients.py         # Tavily + Groq clients, API keys, timeouts
+├── budget.py          # deadline_ms → per-call timeout slices
 └── tests/
-    └── test_agent.py
+    ├── test_agent.py
+    └── test_scoring.py
 ```
 
 ## Capabilities
@@ -59,10 +61,10 @@ instead of rejecting when something's missing:
   up as a line in `identified_risks`, not a failure.
 - **`investment_recommendation`** takes whatever evidence you have — the
   raw output objects from any of the other capabilities
-  (`financial_analysis`, `location_analysis`, `risk_assessment`,
-  `property_profile`), the convenience shortcuts
-  (`financial_score`, `location_score`, `overall_risk`), or a mix. It
-  only fails `invalid_request` when the caller sends literally none of
+  (`property_intelligence`, `financial_analysis`,
+  `location_infrastructure_analysis`, `risk_assessment`), the convenience
+  shortcuts (`financial_score`, `location_score`, `overall_risk`), or a mix.
+  It only fails `invalid_request` when the caller sends literally none of
   that.
 
 ## Running it directly
@@ -114,10 +116,11 @@ that key is missing.
   | `ConnectionError` | `unavailable` | true (unreachable, a 5xx/429) |
   | `TimeoutError` | `timeout` | true |
 
-- **Timeouts are fixed, not budgeted.** Each `clients.py` call has its
-  own timeout (Tavily: 15s, Groq: 25s) instead of a shared deadline
-  tracked across the request. Simple, and enough for an agent that
-  makes at most a couple of calls per capability.
+- **Timeouts are budgeted from `deadline_ms`.** `budget.py` splits the
+  remaining wall-clock across the outbound calls a capability still has
+  to make (capped at 12s each), so three Tavily searches cannot schedule
+  45s against a 30s deadline. Omit `deadline_ms` and the agent assumes
+  30s.
 - **Stdlib only.** `clients.py` talks to Tavily and Groq via raw
   `urllib`, so `command:` in `agent.yaml` stays a bare
   `["python3", "agent_main.py"]` — nothing to install.
@@ -125,6 +128,9 @@ that key is missing.
   keyword heuristics over Tavily search snippets — deliberately simple,
   meant to be swapped for something sturdier without touching
   `agent_main.py`.
+- **Evidence into Groq is size-capped.** `investment_recommendation`
+  rejects caller-supplied evidence objects larger than 8 KiB so the
+  prompt cannot grow without bound.
 
 ## Tests
 

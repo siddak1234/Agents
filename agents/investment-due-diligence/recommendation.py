@@ -7,6 +7,10 @@ BUY / NEGOTIATE / REJECT call via Groq. Nothing is strictly required; a
 caller who only ran risk_assessment still gets a recommendation, just a
 less confident one, because the model is told exactly what evidence is
 and isn't present.
+
+Wire field names match the capabilities that produce them
+(property_intelligence, financial_analysis,
+location_infrastructure_analysis, risk_assessment).
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from budget import DeadlineBudget
 from clients import groq_chat_json
 
 SYSTEM_PROMPT = (
@@ -32,23 +37,27 @@ SYSTEM_PROMPT = (
 )
 
 VALID_RISK_LEVELS = ("Low", "Medium", "High")
+# Cap serialized evidence so a caller cannot dump an unbounded object into
+# the Groq prompt. Normal capability outputs are a few KB at most.
+MAX_EVIDENCE_BYTES = 8_192
 
 
 def recommend(
     *,
-    property_profile: dict[str, Any] | None = None,
+    property_intelligence: dict[str, Any] | None = None,
     financial_analysis: dict[str, Any] | None = None,
-    location_analysis: dict[str, Any] | None = None,
+    location_infrastructure_analysis: dict[str, Any] | None = None,
     risk_assessment: dict[str, Any] | None = None,
     financial_score: float | None = None,
     location_score: float | None = None,
     overall_risk: str | None = None,
     asking_price_inr: float | None = None,
+    budget: DeadlineBudget | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     evidence = _build_evidence(
-        property_profile=property_profile,
+        property_intelligence=property_intelligence,
         financial_analysis=financial_analysis,
-        location_analysis=location_analysis,
+        location_infrastructure_analysis=location_infrastructure_analysis,
         risk_assessment=risk_assessment,
         financial_score=financial_score,
         location_score=location_score,
@@ -57,19 +66,33 @@ def recommend(
     )
     if not evidence:
         raise ValueError(
-            "at least one of property_profile, financial_analysis, location_analysis, "
-            "risk_assessment, financial_score, location_score, or overall_risk is required"
+            "at least one of property_intelligence, financial_analysis, "
+            "location_infrastructure_analysis, risk_assessment, financial_score, "
+            "location_score, or overall_risk is required"
         )
+    _enforce_evidence_size(evidence)
 
-    parsed, usage = groq_chat_json(json.dumps({"evidence": evidence}), system=SYSTEM_PROMPT)
+    groq_timeout = budget.for_call(1) if budget is not None else 25.0
+    parsed, usage = groq_chat_json(
+        json.dumps({"evidence": evidence}), system=SYSTEM_PROMPT, timeout=groq_timeout
+    )
     return _validate_output(parsed), usage
+
+
+def _enforce_evidence_size(evidence: dict[str, Any]) -> None:
+    size = len(json.dumps(evidence, default=str).encode("utf-8"))
+    if size > MAX_EVIDENCE_BYTES:
+        raise ValueError(
+            f"evidence is {size} bytes; maximum is {MAX_EVIDENCE_BYTES}. "
+            "Pass the raw capability outputs, not oversized dumps."
+        )
 
 
 def _build_evidence(
     *,
-    property_profile: dict[str, Any] | None,
+    property_intelligence: dict[str, Any] | None,
     financial_analysis: dict[str, Any] | None,
-    location_analysis: dict[str, Any] | None,
+    location_infrastructure_analysis: dict[str, Any] | None,
     risk_assessment: dict[str, Any] | None,
     financial_score: float | None,
     location_score: float | None,
@@ -84,8 +107,8 @@ def _build_evidence(
     """
     evidence: dict[str, Any] = {}
 
-    if property_profile:
-        evidence["property_profile"] = property_profile
+    if property_intelligence:
+        evidence["property_intelligence"] = property_intelligence
 
     if financial_analysis:
         evidence["financial_analysis"] = financial_analysis
@@ -95,11 +118,11 @@ def _build_evidence(
     if resolved_financial_score is not None:
         evidence["financial_score"] = resolved_financial_score
 
-    if location_analysis:
-        evidence["location_analysis"] = location_analysis
+    if location_infrastructure_analysis:
+        evidence["location_infrastructure_analysis"] = location_infrastructure_analysis
     resolved_location_score = location_score
-    if resolved_location_score is None and location_analysis:
-        resolved_location_score = location_analysis.get("location_score")
+    if resolved_location_score is None and location_infrastructure_analysis:
+        resolved_location_score = location_infrastructure_analysis.get("location_score")
     if resolved_location_score is not None:
         evidence["location_score"] = resolved_location_score
 
