@@ -37,19 +37,11 @@ Rules:
 2. Do not fabricate or assume missing information.
 3. If essential information is missing, clearly state what is missing instead of guessing.
 4. Keep explanations concise, technical, and suitable for refinery operations teams.
-5. Return a structured response that follows the required output schema.
+5. Record the plan by calling the `record_maintenance_plan` tool. Its schema
+   is the output contract — every field is required, and the four task fields
+   are arrays even when empty.
 
-RETURN ONLY VALID JSON
-
-{
-  "plan_summary": "...",
-  "scheduled_tasks": [],
-  "deferred_tasks": [],
-  "risks": [],
-  "recommendations": []
-}
-
-Do not include markdown.
-Do not include explanations outside the JSON.
+Where essential information is missing, say so inside the plan (in
+`plan_summary` or `risks`) rather than omitting a field or inventing a value.
 
 """

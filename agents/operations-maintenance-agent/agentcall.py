@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""A minimal agentcall/v1 agent. Copy this folder to start a new agent.
+"""`agentcall/v1` adapter for the Operations Maintenance Agent.
 
-Standard library only, on purpose: you can run it right now, and it shows the
-whole contract in one screen. A real agent brings its own dependencies (see
-`realty-lead-gen`), but nothing here requires them.
+This file translates the wire protocol into calls on `planner` and back. No
+business logic belongs here — the planning itself, its validation and its
+error vocabulary live in `planner.py`.
 
-Try it without the orchestrator at all:
+The contract lives in docs/AGENT_PROTOCOL.md at the repository root. Run it
+without the orchestrator at all:
 
     echo '{"protocol":"agentcall/v1","capability":"describe","input":{}}' \\
-      | python3 agent_main.py
+      | uv run python agent_main.py
 
-The contract lives in docs/AGENT_PROTOCOL.md at the repository root. The four
-rules that matter are marked RULE below.
+`describe` deliberately imports nothing heavy, so that command answers on a
+machine that cannot install this agent's dependencies.
 """
 
 from __future__ import annotations
@@ -27,9 +28,17 @@ PROTOCOL = "agentcall/v1"
 AGENT_NAME = "operations-maintenance-agent"
 
 
+# Wording is the manifest's, verbatim. A caller reading agent.yaml and a
+# caller invoking `describe` must not be told two different things — nothing
+# in the platform compares these two copies, so keeping them identical is this
+# file's job.
 CAPABILITIES = (
-    ("describe", "Returns metadata describing the Operations Maintenance Agent and its supported capabilities."),
-    ("generate_maintenance_plan", "Generates an optimized refinery maintenance plan from operational constraints."),
+    ("describe", "Report this agent's name and capabilities."),
+    (
+        "generate_maintenance_plan",
+        "Generate an optimized refinery maintenance plan from the provided "
+        "operational constraints.",
+    ),
 )
 
 
@@ -92,59 +101,55 @@ def _dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
         )
 
     if capability == "generate_maintenance_plan":
+        # Imported inside the branch that needs it: `describe` must not pay for
+        # the Anthropic SDK, and must still answer where it is not installed.
+        from planner import (  # noqa: PLC0415 — lazy import per rule 6, keeps describe cheap
+            InvalidInputError,
+            MissingCredentialError,
+            ModelOutputError,
+            generate_maintenance_plan,
+        )
 
-        from planner import generate_maintenance_plan
         # RULE 4: validate your own input and say precisely what was wrong. The
         # orchestrator does not validate for you — the schema in agent.yaml is
-        # documentation, and two validators would drift.
+        # documentation, and two validators would drift. `planner` does the
+        # checking; the three exception types below are how it reports which
+        # side of the call went wrong.
         try:
             response = generate_maintenance_plan(payload)
-            return ok(
-                capability,
-                response["plan"],
-                usage=response["usage"],
-            )
+        except InvalidInputError as exc:
+            # The caller got it wrong.
+            return fail(capability, "invalid_request", str(exc))
+        except MissingCredentialError as exc:
+            # RULE 3: a missing credential is a disabled capability, not a
+            # crash — and never a substring match on someone else's message.
+            return fail(capability, "unavailable", str(exc))
+        except ModelOutputError as exc:
+            # The caller's request was fine and the model's answer was not.
+            # `internal` with the type's documented `retryable: false`: the
+            # call forces `tool_choice`, so a missing or malformed plan is the
+            # API not keeping its own contract — which is what "broke in a way
+            # it did not anticipate" means, and it is where realty-lead-gen
+            # sends the same failure. What is *not* zeroed is the usage: those
+            # tokens were billed before the answer could be inspected.
+            return fail(capability, "internal", str(exc), usage=exc.usage)
+        except Exception as exc:  # noqa: BLE001 — an envelope is mandatory
+            traceback.print_exc(file=sys.stderr)
+            return fail(capability, "internal", f"planning failed: {exc}")
 
-        except ValueError as exc:
-
-                return fail(
-                    capability,
-                    "invalid_request",
-                    str(exc)
-                )
-        
-
-        except Exception as exc:
-
-            message = str(exc)
-
-            if "ANTHROPIC_API_KEY" in message:
-
-                return fail(
-                    capability,
-                    "unavailable",
-                    message,
-                    retryable=False
-                )
-
-            return fail(
-                capability,
-                "internal",
-                f"Planning failed: {exc}"
-            )
+        return ok(capability, response["plan"], usage=response["usage"])
 
     declared = ", ".join(n for n, _ in CAPABILITIES)
     return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
 
-# RULE 3: a missing credential or unreachable dependency returns
-# `unavailable`, never a crash. See agents/realty-lead-gen/'s agentcall.py for
-# a real example — no ANTHROPIC_API_KEY disables photo grading instead of
-# killing the process. The five error types are: invalid_request, unavailable, timeout,
-# internal, transport (transport is orchestrator-side; agents never emit it).
+# The five error types are: invalid_request, unavailable, timeout, internal,
+# transport (transport is orchestrator-side; agents never emit it).
 
 
-def ok(capability: str, output: dict[str, Any], usage: dict[str, int] | None = None):
+def ok(
+    capability: str, output: dict[str, Any], usage: dict[str, int] | None = None
+) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL,
         "ok": True,
@@ -157,13 +162,23 @@ def ok(capability: str, output: dict[str, Any], usage: dict[str, int] | None = N
     }
 
 
-def fail(capability: str, etype: str, message: str, *, retryable: bool = False):
+def fail(
+    capability: str,
+    etype: str,
+    message: str,
+    *,
+    retryable: bool = False,
+    usage: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    # `usage` is a parameter because a failure can still have cost money: a
+    # model call that returns an unusable answer is billed for it, and zeroing
+    # that would make real spend invisible to whoever is counting.
     return {
         "protocol": PROTOCOL,
         "ok": False,
         "capability": capability,
         "output": None,
-        "usage": zero_usage(),
+        "usage": usage or zero_usage(),
         "error": {"type": etype, "message": message, "retryable": retryable},
     }
 

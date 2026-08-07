@@ -64,13 +64,33 @@ Example response:
     "recommendations": []
   },
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cost_micros": 0
+    "input_tokens": 842,
+    "output_tokens": 213,
+    "cost_micros": 5721
   },
   "error": null
 }
 ```
+
+The plan comes back through a forced tool call (`record_maintenance_plan`),
+not by parsing JSON out of the model's prose, so a fenced or chatty reply
+cannot turn a good plan into a failure. `cost_micros` is priced from the real
+token counts — see `_MODEL_PRICING` in `planner.py`, which carries the same
+rates as `realty-lead-gen`.
+
+---
+
+## Errors
+
+| Type | When |
+|---|---|
+| `invalid_request` | The caller's input is missing a required field or has the wrong type. Nothing is sent to the model. |
+| `unavailable` | `ANTHROPIC_API_KEY` is not set. The capability is disabled, not broken. |
+| `internal` | The model did not call the tool, or returned a plan that violates the declared output schema. The call forces `tool_choice`, so this means the API did not keep its own contract. `retryable: false`, the value `docs/AGENT_PROTOCOL.md` gives this type. |
+
+A failure that happened *after* the model call reports the tokens it spent
+rather than zero: those tokens were billed whether or not the answer was
+usable.
 
 ---
 
@@ -91,9 +111,16 @@ The repository runtime passes this variable to the agent through
 
 ## Running Tests
 
+From this folder. These are the commands `agent.yaml` declares, which is what
+`uv run agents test operations-maintenance-agent` and CI run:
+
 ```bash
-python -m unittest discover -s tests -v
+uv run --frozen python -m unittest discover -s tests
+uv run --frozen --extra dev ruff check .
 ```
+
+The tests patch `planner.call_llm`, so they reach no network and need no key
+even where a real one is exported.
 
 ---
 

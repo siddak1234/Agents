@@ -16,7 +16,9 @@ runtime:
 
   test: ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tests"]
 
-  lint: ["uv", "run", "python", "-m", "compileall", "-q", "."]
+  # Ruff and its configuration are this agent's own (see pyproject.toml and
+  # ruff.toml beside this file). `compileall` only proves the source parses.
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
 
   # Only expose the environment variables this agent actually needs.
   env:
