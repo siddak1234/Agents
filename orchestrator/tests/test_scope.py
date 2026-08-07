@@ -51,6 +51,16 @@ def _add(repo: Path, path: str, text: str = "x\n") -> None:
     target.write_text(text, encoding="utf-8")
 
 
+def _advance_main(repo: Path, commits: int) -> None:
+    """Land commits on `main` after `work` branched off it."""
+    _git(repo, "checkout", "-q", "main")
+    for n in range(commits):
+        (repo / "orchestrator" / f"landed_{n}.py").write_text("x\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", f"landed {n}")
+    _git(repo, "checkout", "-q", "work")
+
+
 def _commit_and_scope(repo: Path, *flags: str) -> int:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "work")
@@ -81,6 +91,37 @@ def test_an_edit_to_shared_code_is_refused(repo: Path, capsys: pytest.CaptureFix
     err = capsys.readouterr().err
     assert "orchestrator/runner.py is outside your agent's folder" in err
     assert "its own pull request" in err, "the message must say what to do instead"
+
+
+def test_a_stale_branch_is_told_how_far_behind_it_is(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The shape of the two pull requests that prompted this.
+
+    Both branched, both hit a real bug in shared code, both fixed it, and both
+    were told only to put the file back — while the fix they had rediscovered
+    was already sitting on main. "Put it back" is alarming advice when your
+    branch holds the only copy you can see.
+    """
+    _advance_main(repo, 2)
+    _add(repo, "agents/parcel-geo/agent.yaml")
+    _add(repo, "orchestrator/runner.py", "x\n# fixed a bug I hit\n")
+
+    assert _commit_and_scope(repo) == 1
+    err = capsys.readouterr().err
+    assert "2 commit(s) behind main" in err
+    assert "already fixed there" in err
+
+
+def test_an_up_to_date_branch_is_not_told_it_is_behind(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The note is only ever true of a stale branch, so it only fires there."""
+    _add(repo, "agents/parcel-geo/agent.yaml")
+    _add(repo, "orchestrator/runner.py", "x\n# reformatted by my editor\n")
+
+    assert _commit_and_scope(repo) == 1
+    assert "behind" not in capsys.readouterr().err
 
 
 def test_touching_another_persons_agent_is_refused(repo: Path) -> None:

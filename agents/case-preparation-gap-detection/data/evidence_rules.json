@@ -1,0 +1,40 @@
+[
+  {
+   "trigger_keywords": ["weapon", "knife", "firearm", "gun", "pistol"],
+   "expected": "forensic_report",
+   "reason": "weapon recovery mentioned"
+  },
+  {
+    "trigger_keywords": ["injury", "injuries", "wound", "assault", "beaten"],
+    "expected": "medical_report",
+    "reason": "physical injury alleged"
+  },
+  {
+    "trigger_keywords": ["death", "deceased", "killed", "murder"],
+    "expected": "post_mortem_report",
+    "reason": "death alleged"
+  },
+  {
+ 
+    
+    "trigger_keywords": ["i saw", "eyewitness", "witnessed the"],
+    "expected": "witness_statement",
+    "reason": "eyewitness account referenced but no witness statement document found"
+
+},
+  {
+    "trigger_keywords": ["cctv", "camera footage", "surveillance"],
+    "expected": "forensic_report",
+    "reason": "video/camera evidence referenced"
+  },
+  {
+    "trigger_keywords": ["blood", "dna", "hair sample", "fiber"],
+    "expected": "forensic_report",
+    "reason": "physical trace evidence mentioned"
+  },
+  {
+    "trigger_keywords": ["theft", "stolen", "robbery", "burglary"],
+    "expected": "charge_sheet",
+    "reason": "property crime alleged"
+  }
+]

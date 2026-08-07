@@ -16,4 +16,6 @@ version: 2
 
 agents:
   - path: agents/realty-lead-gen
+  - path: agents/case-preparation-gap-detection
+  - path: agents/phishing-incident-triage
   - path: agents/operations-maintenance-agent
