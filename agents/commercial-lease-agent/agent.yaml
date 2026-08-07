@@ -14,7 +14,7 @@ runtime:
   type: subprocess
   command: ["uv", "run", "python", "agent_main.py"]
   test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-q"]
-  lint: ["uv", "run", "python", "-m", "compileall", "-q", "."]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
   env:
     inherit:
       - "ANTHROPIC_API_KEY"
