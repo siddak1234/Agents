@@ -27,6 +27,7 @@ def _call(capability: str, input_payload: dict, env: dict | None = None) -> dict
         text=True,
         cwd=AGENT_DIR,
         env=env if env is not None else os.environ.copy(),
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout)

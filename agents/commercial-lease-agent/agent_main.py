@@ -13,7 +13,6 @@ import lease_logic
 PROTOCOL = "agentcall/v1"
 AGENT_NAME = "commercial-lease-agent"          # must equal the folder name
 
-# Mirrors agent.yaml by hand. `agents check` fails if the two disagree.
 CAPABILITIES = (
     ("describe", "Report this agent's name and capabilities. Costs nothing."),
     ("extract_clauses", "Extract renewal, financial, and maintenance clauses from a lease's pages."),
@@ -22,7 +21,6 @@ CAPABILITIES = (
 
 
 def main() -> int:
-    # RULE 1. Do this before anything else can print.
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
     try:
@@ -36,45 +34,52 @@ def main() -> int:
     json.dump(envelope, real_stdout)
     real_stdout.write("\n")
     real_stdout.flush()
-    return 0                      # RULE 2: an envelope was produced.
+    return 0
 
 
 def dispatch(raw: str) -> dict[str, Any]:
+    request, parse_error = _parse_request(raw)
+    if parse_error is not None:
+        return parse_error
+
+    capability = request["capability"]
+    handler = _CAPABILITY_HANDLERS.get(capability)
+    if handler is None:
+        declared = ", ".join(n for n, _ in CAPABILITIES)
+        return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
+
+    return handler(request["input"])
+
+
+def _parse_request(raw: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Return (request, None) on success, or ({}, error_envelope) on failure."""
     try:
         request = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
-        return fail("", "invalid_request", f"stdin is not valid JSON: {exc}")
+        return {}, fail("", "invalid_request", f"stdin is not valid JSON: {exc}")
     if not isinstance(request, dict):
-        return fail("", "invalid_request", "request must be a JSON object")
+        return {}, fail("", "invalid_request", "request must be a JSON object")
     if request.get("protocol") != PROTOCOL:
-        return fail("", "invalid_request", f"unsupported protocol {request.get('protocol')!r}")
+        return {}, fail("", "invalid_request", f"unsupported protocol {request.get('protocol')!r}")
 
     capability = request.get("capability")
     if not isinstance(capability, str):
-        return fail("", "invalid_request", "missing 'capability'")
+        return {}, fail("", "invalid_request", "missing 'capability'")
 
     payload = request.get("input") or {}
     if not isinstance(payload, dict):
-        return fail(capability, "invalid_request", "'input' must be an object")
+        return {}, fail(capability, "invalid_request", "'input' must be an object")
 
-    if capability == "describe":
-        return ok(capability, {
-            "name": AGENT_NAME,
-            "protocol": PROTOCOL,
-            "capabilities": [{"name": n, "description": d} for n, d in CAPABILITIES],
-        })
-
-    if capability == "extract_clauses":
-        return _handle_extract_clauses(payload)
-
-    if capability == "calculate_deadline":
-        return _handle_calculate_deadline(payload)
-
-    declared = ", ".join(n for n, _ in CAPABILITIES)
-    return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
+    return {"capability": capability, "input": payload}, None
 
 
-# RULE 4: validate your own input, and say what was wrong.
+def _handle_describe(_payload: dict[str, Any]) -> dict[str, Any]:
+    return ok("describe", {
+        "name": AGENT_NAME,
+        "protocol": PROTOCOL,
+        "capabilities": [{"name": n, "description": d} for n, d in CAPABILITIES],
+    })
+
 
 def _handle_extract_clauses(payload: dict[str, Any]) -> dict[str, Any]:
     capability = "extract_clauses"
@@ -86,13 +91,9 @@ def _handle_extract_clauses(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         clauses, usage = lease_logic.extract_clauses(lease_pages)
-    except lease_logic.MissingCredentialError as exc:
-        # RULE 3: a missing credential is unavailable, never a crash.
-        return fail(capability, "unavailable", str(exc))
-    except lease_logic.ModelCallError as exc:
-        return fail(capability, "unavailable", str(exc), retryable=True)
     except lease_logic.LeaseLogicError as exc:
-        return fail(capability, "internal", str(exc))
+        etype, retryable = _EXTRACT_ERROR_MAP.get(type(exc), ("internal", False))
+        return fail(capability, etype, str(exc), retryable=retryable, usage=getattr(exc, "usage", None))
 
     return ok(capability, {"clauses": clauses}, usage=usage)
 
@@ -117,6 +118,22 @@ def _handle_calculate_deadline(payload: dict[str, Any]) -> dict[str, Any]:
     return ok(capability, {"deadline_date": deadline})
 
 
+# Maps a raised exception type to (error.type, retryable). A missing
+# credential or dependency won't fix itself on retry; a model-call failure
+# (network blip, transient API error) might.
+_EXTRACT_ERROR_MAP: dict[type, tuple[str, bool]] = {
+    lease_logic.MissingCredentialError: ("unavailable", False),
+    lease_logic.MissingDependencyError: ("unavailable", False),
+    lease_logic.ModelCallError: ("unavailable", True),
+}
+
+_CAPABILITY_HANDLERS = {
+    "describe": _handle_describe,
+    "extract_clauses": _handle_extract_clauses,
+    "calculate_deadline": _handle_calculate_deadline,
+}
+
+
 def ok(capability: str, output: dict[str, Any], *, usage: dict[str, int] | None = None) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL, "ok": True, "capability": capability,
@@ -124,10 +141,17 @@ def ok(capability: str, output: dict[str, Any], *, usage: dict[str, int] | None 
     }
 
 
-def fail(capability: str, etype: str, message: str, *, retryable: bool = False) -> dict[str, Any]:
+def fail(
+    capability: str,
+    etype: str,
+    message: str,
+    *,
+    retryable: bool = False,
+    usage: dict[str, int] | None = None,
+) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL, "ok": False, "capability": capability,
-        "output": None, "usage": zero_usage(),
+        "output": None, "usage": usage or zero_usage(),
         "error": {"type": etype, "message": message, "retryable": retryable},
     }
 
