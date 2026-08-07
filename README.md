@@ -60,7 +60,8 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 | [`phishing-incident-triage`](./agents/phishing-incident-triage) | active | `triage_email` |
 | [`operations-maintenance-agent`](./agents/operations-maintenance-agent) | active | `describe`, `generate_maintenance_plan` |
 | [`investment-due-diligence`](./agents/investment-due-diligence) | active | `property_intelligence`, `financial_analysis`, `location_infrastructure_analysis`, `risk_assessment`, `investment_recommendation` |
-| [`commercial-lease-agent`](./agents/commercial-lease-agent) | active | `extract_clauses`, `calculate_deadline` |
+| [`commercial-lease-agent`](./agents/commercial-lease-agent) | active | `describe`, `extract_clauses`, `calculate_deadline` |
+
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered
 agent has no row here — it cannot catch a stale Status cell, so treat that
