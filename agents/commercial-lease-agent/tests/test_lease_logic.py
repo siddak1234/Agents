@@ -138,7 +138,7 @@ class _FakeAnthropicModule:
     def __init__(self, queue):
         self._queue = queue
 
-    def Anthropic(self, api_key):
+    def Anthropic(self, api_key):  # noqa: N802 — must match anthropic.Anthropic's real name
         return _FakeClient(self._queue)
 
 
