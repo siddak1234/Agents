@@ -22,7 +22,14 @@ import pytest
 
 from orchestrator import manifest as manifest_mod
 from orchestrator.contract import PROTOCOL, CallRequest
-from orchestrator.discovery import AGENTS_DIR, SKIP_DIRS, TEMPLATE_DIR, load_registry, repo_root
+from orchestrator.discovery import (
+    AGENTS_DIR,
+    SKIP_DIRS,
+    TEMPLATE_DIR,
+    TODO_MARKER,
+    load_registry,
+    repo_root,
+)
 from orchestrator.runner import call, describe
 
 TEMPLATE = repo_root() / TEMPLATE_DIR
@@ -146,6 +153,29 @@ def test_neither_side_imports_the_other():
         p for p in _sources(root / "orchestrator") if agent_modules & _top_level_imports(p)
     ]
     assert not offenders, f"the orchestrator imports agent code: {offenders}"
+
+
+def test_the_docstring_carries_a_marker():
+    """Prose about the template needs the same tripwire as everything else.
+
+    `agent.yaml`, the starter test, README.md and the body of `agent_main.py`
+    all plant `TODO(new agent)`; the module docstring did not, and it is the
+    one piece of prose here a reader takes at face value. "Standard library
+    only, on purpose" is false the moment an agent adds a dependency, and on
+    the last agent added here it survived two rounds of review still saying so.
+
+    `integration_problems` already scans whole files, so the marker is the
+    whole fix — which is exactly why it can be deleted by accident while the
+    docstring is being reworded. This is what notices.
+    """
+    tree = ast.parse((TEMPLATE / "agent_main.py").read_text(encoding="utf-8"))
+    docstring = ast.get_docstring(tree)
+
+    assert docstring is not None, "agent_main.py lost its module docstring"
+    assert TODO_MARKER in docstring, (
+        "the template's module docstring has no TODO(new agent) marker, so a "
+        "copy that leaves it verbatim passes `agents list --strict`"
+    )
 
 
 def test_a_copy_becomes_a_real_agent(tmp_path):

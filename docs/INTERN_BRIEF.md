@@ -325,6 +325,11 @@ you on a fork, so this list is the review your work gets first:
 - [ ] Your tests would fail if the capability were deleted
 - [ ] `LICENSE` exists and you chose it deliberately
 - [ ] No `TODO(new agent)` marker left anywhere in your folder
+- [ ] If it calls a model, you built all three things question 7 asks for —
+      structured output through a tool schema, graceful degradation without a
+      key, and `usage` reporting a real `cost_micros`. That question is easy to
+      answer yes to and then only half-build; the pull request template lists
+      them separately for the same reason
 
 ### What happens next
 
