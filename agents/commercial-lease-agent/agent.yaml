@@ -41,9 +41,10 @@ capabilities:
   - name: extract_clauses
     description: >-
       Extract renewal, financial, and maintenance clauses from a lease given
-      as an array of per-page text. Uses a language model with a tool schema
-      for structured output. Returns each clause's type, exact source quote,
-      physical page number, and a confidence score.
+      as an array of per-page text. Uses a language model with multi-shot
+      prompting and a tool schema for structured output. Returns each
+      clause's type, exact source quote, physical page number, and a
+      confidence score.
     input_schema:
       type: object
       required: [lease_pages]
@@ -63,10 +64,22 @@ capabilities:
             type: object
             required: [clause_type, text_quote, page_number, confidence_score]
             properties:
-              clause_type: { type: string, enum: [renewal, financial, maintenance] }
-              text_quote: { type: string }
-              page_number: { type: integer }
-              confidence_score: { type: number }
+              clause_type:
+                type: string
+                enum: [renewal, financial, maintenance]
+                description: Which of the three tracked categories this clause belongs to.
+              text_quote:
+                type: string
+                description: Exact text copied verbatim from the source page. Never paraphrased or summarized.
+              page_number:
+                type: integer
+                minimum: 1
+                description: 1-indexed physical page (matching lease_pages) where this quote was found.
+              confidence_score:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: How clearly the source text states this obligation, from 0.0 (uncertain) to 1.0 (explicit and unambiguous).
 
   - name: calculate_deadline
     description: >-
@@ -77,11 +90,20 @@ capabilities:
       type: object
       required: [lease_end_date, notice_period_days]
       properties:
-        lease_end_date: { type: string, description: "YYYY-MM-DD" }
-        notice_period_days: { type: integer }
+        lease_end_date:
+          type: string
+          format: date
+          description: The lease's end date, in YYYY-MM-DD format.
+        notice_period_days:
+          type: integer
+          minimum: 0
+          description: Number of days of notice required before lease_end_date.
       additionalProperties: false
     output_schema:
       type: object
       required: [deadline_date]
       properties:
-        deadline_date: { type: string, description: "YYYY-MM-DD" }
+        deadline_date:
+          type: string
+          format: date
+          description: The date notice_period_days before lease_end_date, in YYYY-MM-DD format.

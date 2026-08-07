@@ -33,6 +33,60 @@ DEFAULT_MODEL = "claude-sonnet-5"
 # LEASE_AGENT_CHUNK_SIZE.
 DEFAULT_CHUNK_SIZE = 20
 
+_EXTRACTION_GUIDANCE = """\
+You are extracting clauses from a commercial lease excerpt. Work only from
+the text given below — do not use outside knowledge about typical leases.
+
+WHAT TO EXTRACT
+- renewal: automatic renewal, renewal options, non-renewal notice requirements.
+- financial: base rent, escalations, percentage rent, security deposit, CAM charges.
+- maintenance: who repairs what (structural, roof, HVAC, interior, common areas).
+
+WHAT NOT TO EXTRACT
+- Definitions sections, recitals, signature blocks, notary acknowledgments.
+- Clauses about insurance, indemnification, assignment, or default that do not
+  also state a renewal, financial, or maintenance obligation.
+- Headers, footers, and page or section numbers on their own.
+
+RULES
+- text_quote must be copied character-for-character from the page text below
+  — never paraphrase or summarize it.
+- If the same clause appears more than once (e.g. once in a table of
+  contents or summary, again in the body), extract it once, from the most
+  complete instance.
+- confidence_score reflects how clearly the text states the obligation: use
+  0.9-1.0 for an explicit, unambiguous statement; 0.6-0.8 when the wording
+  is present but needs some interpretation; below 0.6 only for a clause
+  you're genuinely unsure qualifies. Extract ambiguous clauses rather than
+  omitting them — let the low score carry the uncertainty.
+
+EXAMPLES
+
+Excerpt: "Tenant may renew this Lease for one additional term of five (5)
+years by delivering written notice to Landlord not less than one hundred
+eighty (180) days prior to the expiration of the then-current term."
+Good extraction: clause_type "renewal", text_quote is that exact sentence,
+confidence_score 0.97 — the renewal right and notice period are both stated
+explicitly with no ambiguity.
+
+Excerpt: "Base Rent for the initial Lease Year shall be $42.00 per rentable
+square foot, increasing by three percent (3%) on each anniversary of the
+Commencement Date."
+Good extraction: clause_type "financial", text_quote is that exact
+sentence, confidence_score 0.96 — a concrete rent figure and escalation
+rate are both stated.
+
+Excerpt: "Tenant shall maintain the Premises in good condition, reasonable
+wear and tear excepted, and shall be responsible for repairs arising from
+Tenant's negligence; Landlord shall be responsible for the structural
+elements of the Building, including the roof, foundation, and load-bearing
+walls."
+Good extraction: two separate maintenance entries, one for Tenant's
+interior/negligence-repair obligation and one for Landlord's structural
+obligation, each with its own exact text_quote — they assign responsibility
+to different parties, so a caller needs to tell them apart.
+"""
+
 _MAX_OUTPUT_TOKENS_PER_CHUNK = 4096
 
 # Published per-million-token USD list pricing
@@ -162,13 +216,11 @@ def _build_tool_schema() -> dict[str, Any]:
 def _build_prompt(pages: list[str], offset: int) -> str:
     numbered = "\n\n".join(f"--- page {offset + i + 1} ---\n{text}" for i, text in enumerate(pages))
     return (
-        "Read this excerpt from a commercial lease "
+        _EXTRACTION_GUIDANCE
+        + "\n\nNow extract from this excerpt "
         f"(pages {offset + 1}-{offset + len(pages)} of the full document). "
-        "Find every clause about renewal terms, financial terms, or "
-        "maintenance responsibilities. For each one, quote the exact source "
-        "text, note which page it is on, and rate your confidence from 0.0 "
-        "to 1.0. Call record_clauses with everything you find in this "
-        "excerpt, and nothing else.\n\n" + numbered
+        "Call record_clauses with everything you find in this excerpt, and "
+        "nothing else.\n\n" + numbered
     )
 
 
