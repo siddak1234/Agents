@@ -1,0 +1,18 @@
+[project]
+name = "operations-maintenance-agent"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+dependencies = [
+    "anthropic>=0.58.2"
+]
+
+# Declared here, not borrowed from the repository root. `uv run` walks up to
+# the root project when a folder has no pyproject.toml of its own, which is
+# how two sibling agents ended up linting against the platform's ruff and its
+# configuration — and would stop linting at all the moment the folder was
+# copied out of this repository.
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.10.0"
+]
