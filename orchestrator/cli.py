@@ -222,6 +222,21 @@ def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
             f"them. Say what you need in yours instead.",
             file=sys.stderr,
         )
+        # Two contributors in a row changed shared code to fix a bug that was
+        # already fixed on main, having branched before the fix landed. The
+        # message above tells them to put the file back; on a stale branch that
+        # reads as losing the fix, because from where they are standing it is
+        # the only copy. Naming the distance is what makes "put it back" and
+        # "you keep the fix" the same sentence.
+        behind = _commits_behind(root, args.base)
+        if behind:
+            print(
+                f"\nnote: your branch is {behind} commit(s) behind {args.base}. "
+                f"If you changed shared code to fix something, check whether it "
+                f"is already fixed there — rebasing may leave you with nothing "
+                f"to put back.",
+                file=sys.stderr,
+            )
         return 1
 
     scoped = ", ".join(touched_agents) if touched_agents else "no agent folder"
@@ -252,6 +267,29 @@ def _changed_paths(root: Path, base: str) -> list[str]:
     if completed.returncode != 0:
         raise _ScopeUnavailableError(f"cannot diff against {base!r}: {completed.stderr.strip()}")
     return [line for line in completed.stdout.splitlines() if line]
+
+
+def _commits_behind(root: Path, base: str) -> int | None:
+    """How many commits `base` has that HEAD does not, or None if unknowable.
+
+    Never raises. This decorates a failure that has already been decided, so a
+    shallow clone or a missing ref must cost the caller a line of advice, not
+    an error — the same reasoning that makes `_changed_paths` unavailability a
+    skip rather than a violation.
+    """
+    completed = subprocess.run(  # noqa: S603 — argv is fixed; `base` is a ref name
+        ["git", "rev-list", "--count", f"HEAD..{base}"],  # noqa: S607
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    try:
+        return int(completed.stdout.strip())
+    except ValueError:
+        return None
 
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:

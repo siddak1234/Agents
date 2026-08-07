@@ -734,6 +734,15 @@ envelope = json.loads(proc.stdout)      # fails if anything else was printed
 Cover at least: `describe` matching the manifest, an unknown capability, a
 malformed input, and each error type your agent can return.
 
+**No test may reach the network.** Setting a fake API key does not prevent one:
+a fake key is still a key, so your code skips its "missing credential" branch
+and makes the call for real — the review runs your suite, and twice now that
+has meant a live request to somebody's paid API from a reviewer's machine. If
+you need to test the "key present but rejected" path, intercept the transport
+(monkeypatch the function that makes the call). If you only need to prove an
+input passes validation, assert on the missing-key message instead — that
+proves the input got as far as the call without one being made.
+
 ### Things that will get your PR sent back
 
 Real findings from a real review of a deliberately bad agent:

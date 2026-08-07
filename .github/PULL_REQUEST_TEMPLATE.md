@@ -23,6 +23,9 @@ Delete the section that does not apply.
       scans every file, not just `agent.yaml`
 - [ ] Every capability in the code is declared in `agent.yaml`, and vice versa
 - [ ] `runtime.env.inherit` names only variables a capability actually uses
+- [ ] `runtime.lint` runs a real linter — the template ships `compileall` as a
+      placeholder and says to replace it once you have dependencies
+- [ ] No test reaches the network, including with a fake API key set
 - [ ] Registered in `registry.yaml` and listed in the README table
 - [ ] Agent has its own `README.md`, `LICENSE`, and tests
 - [ ] Runs standalone — the folder does not depend on the orchestrator
