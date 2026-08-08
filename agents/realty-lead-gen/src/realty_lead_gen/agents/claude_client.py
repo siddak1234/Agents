@@ -113,6 +113,16 @@ class ClaudeClient:
         messages: list[dict[str, Any]],
         system: str | list[dict[str, Any]] | None = None,
         max_tokens: int = 4096,
+        # Safe only on a model that still accepts a non-default sampling
+        # parameter. claude-sonnet-4-5 (this agent's current default, see
+        # config.py's `anthropic_model_vision`) does. claude-sonnet-5,
+        # Opus 4.6 and later, and Fable 5 do not — they reject `temperature`
+        # set to anything but the API default (1.0) with a 400 on every call.
+        # commercial-lease-agent shipped exactly this bug: `temperature=0.0`
+        # copied from here onto claude-sonnet-5, which made its only paid
+        # capability non-functional until it was caught and removed. Before
+        # pointing ANTHROPIC_MODEL_VISION at a newer model, remove this
+        # parameter first, or confirm the target model still accepts it.
         temperature: float = 0.0,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: dict[str, Any] | None = None,
