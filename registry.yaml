@@ -19,3 +19,4 @@ agents:
   - path: agents/case-preparation-gap-detection
   - path: agents/phishing-incident-triage
   - path: agents/operations-maintenance-agent
+  - path: agents/investment-due-diligence
