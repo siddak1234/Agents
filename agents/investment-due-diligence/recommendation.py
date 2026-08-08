@@ -19,21 +19,78 @@ import json
 from typing import Any
 
 from budget import DeadlineBudget
-from clients import groq_chat_json
+from clients import groq_tool_call
+
+RECOMMENDATIONS = ("BUY", "NEGOTIATE", "REJECT")
+
+#: Named once. It is the tool definition, the forced `tool_choice` target,
+#: and the shape `_validate_output` checks — so the schema the model is
+#: asked for and the schema the envelope publishes cannot drift apart.
+#: `tests/golden/recommendation_tool_schema.json` pins it, so editing the
+#: contract with the model is a deliberate, reviewable act.
+RECOMMENDATION_TOOL_NAME = "record_investment_recommendation"
+RECOMMENDATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": RECOMMENDATION_TOOL_NAME,
+        "description": (
+            "Record the final BUY / NEGOTIATE / REJECT call for this residential "
+            "property, with the evidence that drove it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "recommendation": {
+                    "type": "string",
+                    "enum": list(RECOMMENDATIONS),
+                    "description": "The investment call.",
+                },
+                "confidence_percent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": (
+                        "How confident the call is, lowered in proportion to "
+                        "whatever evidence was missing."
+                    ),
+                },
+                "key_strengths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Short points in the property's favour.",
+                },
+                "key_concerns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Short points against it. Name any evidence gaps here."
+                    ),
+                },
+                "recommended_offer_price_inr": {
+                    "type": "number",
+                    "description": (
+                        "Offer to counter with, in INR. Omit unless an asking "
+                        "price was supplied."
+                    ),
+                },
+            },
+            "required": [
+                "recommendation",
+                "confidence_percent",
+                "key_strengths",
+                "key_concerns",
+            ],
+        },
+    },
+}
 
 SYSTEM_PROMPT = (
     "You are a conservative residential real-estate investment analyst in India. "
     "You will be given an 'evidence' object built from whatever the caller had "
     "available -- it may be partial. Missing evidence is not an error; reason with "
     "what's there, and lower your confidence_percent in proportion to what's "
-    "missing rather than guessing. Respond with a single JSON object with exactly "
-    "these keys: "
-    '"recommendation" (one of "BUY", "NEGOTIATE", "REJECT"), '
-    '"confidence_percent" (integer 0-100), '
-    '"key_strengths" (array of short strings), '
-    '"key_concerns" (array of short strings, and include any evidence gaps here), '
-    '"recommended_offer_price_inr" (number or null, only if an asking price was given). '
-    "Return only the JSON object, nothing else."
+    "missing rather than guessing. Record your answer by calling "
+    f"{RECOMMENDATION_TOOL_NAME}, and list any evidence gaps among key_concerns."
 )
 
 VALID_RISK_LEVELS = ("Low", "Medium", "High")
@@ -53,7 +110,7 @@ def recommend(
     overall_risk: str | None = None,
     asking_price_inr: float | None = None,
     budget: DeadlineBudget | None = None,
-) -> tuple[dict[str, Any], dict[str, int]]:
+) -> dict[str, Any]:
     evidence = _build_evidence(
         property_intelligence=property_intelligence,
         financial_analysis=financial_analysis,
@@ -73,10 +130,13 @@ def recommend(
     _enforce_evidence_size(evidence)
 
     groq_timeout = budget.for_call(1) if budget is not None else 25.0
-    parsed, usage = groq_chat_json(
-        json.dumps({"evidence": evidence}), system=SYSTEM_PROMPT, timeout=groq_timeout
+    parsed = groq_tool_call(
+        json.dumps({"evidence": evidence}),
+        tool=RECOMMENDATION_TOOL,
+        system=SYSTEM_PROMPT,
+        timeout=groq_timeout,
     )
-    return _validate_output(parsed), usage
+    return _validate_output(parsed)
 
 
 def _enforce_evidence_size(evidence: dict[str, Any]) -> None:
@@ -143,14 +203,30 @@ def _build_evidence(
 
 
 def _validate_output(parsed: dict[str, Any]) -> dict[str, Any]:
-    recommendation = parsed.get("recommendation")
-    if recommendation not in ("BUY", "NEGOTIATE", "REJECT"):
-        recommendation = "NEGOTIATE"
+    """Checks the model's tool arguments against what the manifest publishes.
 
-    try:
-        confidence = max(0, min(100, int(parsed.get("confidence_percent", 50))))
-    except (TypeError, ValueError):
-        confidence = 50
+    A missing or off-enum `recommendation` used to become "NEGOTIATE", and a
+    missing `confidence_percent` used to become 50 -- an answer the model
+    never gave, returned `ok: true` and indistinguishable from one it did.
+    Both fields are `required` in RECOMMENDATION_TOOL, so their absence is a
+    model failure; ConnectionError reports it as retryable `unavailable`,
+    which is what it is.
+    """
+    recommendation = parsed.get("recommendation")
+    if recommendation not in RECOMMENDATIONS:
+        raise ConnectionError(
+            f"Groq returned recommendation {recommendation!r}; expected one of "
+            f"{', '.join(RECOMMENDATIONS)}"
+        )
+
+    raw_confidence = parsed.get("confidence_percent")
+    if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+        raise ConnectionError(
+            f"Groq returned confidence_percent {raw_confidence!r}; expected a number 0-100"
+        )
+    # Clamping a number the model *did* supply keeps its judgment; the
+    # schema already asks for 0-100, so this only catches an overshoot.
+    confidence = max(0, min(100, int(raw_confidence)))
 
     offer_price = parsed.get("recommended_offer_price_inr")
     if isinstance(offer_price, bool) or not isinstance(offer_price, (int, float)):

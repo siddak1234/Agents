@@ -73,9 +73,11 @@ capabilities:
       versus comparable pricing, estimated rental yield, and estimated ROI,
       via Tavily market search. Only 'location' is required -- price can
       be supplied as 'price_per_sqft' directly, or derived from
-      'asking_price_inr' + 'area_sqft', or omitted entirely (in which case
-      market_value/premium_percent come back null but yield/ROI are still
-      estimated from location alone). Fails unavailable if TAVILY_API_KEY
+      'asking_price_inr' + 'area_sqft', or omitted entirely. Scores are
+      0-10. market_value/premium_percent come back null -- never a guess --
+      whenever the comparison cannot be made: no price supplied, or no
+      comparable rate found in the search results. Yield and ROI are still
+      estimated from location alone. Fails unavailable if TAVILY_API_KEY
       is unset or Tavily is unreachable.
     input_schema:
       type: object
@@ -94,7 +96,7 @@ capabilities:
         premium_percent: { type: [number, "null"] }
         estimated_rental_yield_percent: { type: number }
         estimated_roi_percent: { type: number }
-        financial_score: { type: number }
+        financial_score: { type: number, minimum: 0, maximum: 10 }
 
   - name: location_infrastructure_analysis
     description: >-
@@ -114,11 +116,11 @@ capabilities:
       type: object
       required: [location_score]
       properties:
-        connectivity_score: { type: number }
-        amenities_score: { type: number }
+        connectivity_score: { type: number, minimum: 0, maximum: 10 }
+        amenities_score: { type: number, minimum: 0, maximum: 10 }
         growth_potential: { type: string }
         planned_infrastructure: { type: array, items: { type: string } }
-        location_score: { type: number }
+        location_score: { type: number, minimum: 0, maximum: 10 }
         coordinates:
           type: [object, "null"]
           properties:
@@ -162,9 +164,13 @@ capabilities:
       location_infrastructure_analysis, risk_assessment) and/or the
       convenience shortcuts (financial_score, location_score,
       overall_risk) for whichever ones you have -- the model reasons
-      over whatever subset is present and calls out what's missing.
+      over whatever subset is present and calls out what's missing. The
+      answer arrives through a forced tool call whose schema mirrors this
+      capability's output schema, so a recommendation is either the
+      model's own or an error -- never a default standing in for one.
       Fails invalid_request if no evidence at all is supplied. Fails
-      unavailable if GROQ_API_KEY is unset or Groq is unreachable.
+      unavailable if GROQ_API_KEY is unset, Groq is unreachable, or the
+      model's answer carries no usable recommendation.
     input_schema:
       type: object
       properties:
@@ -172,8 +178,8 @@ capabilities:
         financial_analysis: { type: object }
         location_infrastructure_analysis: { type: object }
         risk_assessment: { type: object }
-        financial_score: { type: number }
-        location_score: { type: number }
+        financial_score: { type: number, minimum: 0, maximum: 10 }
+        location_score: { type: number, minimum: 0, maximum: 10 }
         overall_risk: { type: string, enum: [Low, Medium, High] }
         asking_price_inr: { type: number }
       additionalProperties: true
@@ -182,7 +188,7 @@ capabilities:
       required: [recommendation, confidence_percent]
       properties:
         recommendation: { type: string, enum: [BUY, NEGOTIATE, REJECT] }
-        confidence_percent: { type: number }
+        confidence_percent: { type: number, minimum: 0, maximum: 100 }
         key_strengths: { type: array, items: { type: string } }
         key_concerns: { type: array, items: { type: string } }
         recommended_offer_price_inr: { type: [number, "null"] }

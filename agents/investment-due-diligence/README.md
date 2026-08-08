@@ -23,8 +23,11 @@ investment-due-diligence/
 ├── clients.py         # Tavily + Groq clients, API keys, timeouts
 ├── budget.py          # deadline_ms → per-call timeout slices
 └── tests/
-    ├── test_agent.py
-    └── test_scoring.py
+    ├── test_agent.py         # the envelope, over a real subprocess
+    ├── test_capabilities.py  # capability composition + accounting, clients stubbed
+    ├── test_scoring.py       # the scoring/extraction helpers, one at a time
+    └── golden/
+        └── recommendation_tool_schema.json   # the schema sent to the model
 ```
 
 ## Capabilities
@@ -54,8 +57,10 @@ instead of rejecting when something's missing:
 - **`financial_analysis`** needs only `location`. Give it `price_per_sqft`
   directly, or `asking_price_inr` + `area_sqft` (it derives
   `price_per_sqft` itself), or neither (it still estimates rental yield
-  and ROI from the location alone — `market_value`/`premium_percent`
-  come back `null` instead of a guess).
+  and ROI from the location alone). `market_value`/`premium_percent` come
+  back `null` instead of a guess whenever the comparison cannot honestly
+  be made — either no price was supplied, or the search turned up no
+  comparable rate to measure it against.
 - **`risk_assessment`** needs only `location`. `builder` and
   `property_type` sharpen the result when supplied; their absence shows
   up as a line in `identified_risks`, not a failure.
@@ -131,6 +136,21 @@ that key is missing.
 - **Evidence into Groq is size-capped.** `investment_recommendation`
   rejects caller-supplied evidence objects larger than 8 KiB so the
   prompt cannot grow without bound.
+- **The recommendation comes back through a forced tool call.**
+  `RECOMMENDATION_TOOL` in `recommendation.py` is the tool definition, the
+  forced `tool_choice`, and the shape `_validate_output` checks, so the
+  schema asked of the model cannot drift from the one the envelope
+  publishes; `tests/golden/` pins it. If the model returns no usable
+  `recommendation` or `confidence_percent`, the capability fails
+  `unavailable` (retryable) rather than substituting a default — an
+  invented "NEGOTIATE at 50%" is indistinguishable from a real call, and
+  this is the one field the agent exists to produce.
+- **`usage` reports what was actually spent.** Tavily bills 1 credit per
+  `search_depth: "basic"` search ($0.008), and Groq bills tokens; both are
+  recorded in `clients.py` as they are spent and read once in
+  `agent_main.py` where the envelope is built. A request that paid for two
+  searches and then failed reports those two searches rather than zero.
+  OpenStreetMap geocoding is free and is not counted.
 
 ## Tests
 
@@ -138,10 +158,17 @@ that key is missing.
 python3 -m unittest discover -s tests
 ```
 
-Tests run the real `agent_main.py` as a subprocess, the same way the
-orchestrator does, so stdout hygiene and the exit code are checked, not
-assumed. None of them touch the network — every case either needs no
-external call, or fails validation before one would be made.
+`test_agent.py` runs the real `agent_main.py` as a subprocess, the same
+way the orchestrator does, so stdout hygiene and the exit code are
+checked, not assumed. `test_capabilities.py` covers what the subprocess
+tests cannot reach without a key: it stubs `tavily_search`/`geocode` where
+the assertion is about scoring composition, and replaces
+`urllib.request.urlopen` where it is about the envelope, so the real
+client code, error mapping and spend tally all run.
+
+None of them touch the network. The envelope tests do set fake API keys,
+but the transport itself is replaced, so no socket is opened and a real
+key cannot be picked up from the environment either.
 
 ## Wiring it into the repository
 

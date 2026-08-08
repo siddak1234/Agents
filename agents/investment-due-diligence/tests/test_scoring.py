@@ -144,18 +144,36 @@ class TestValidateOutput(unittest.TestCase):
         self.assertEqual(out["confidence_percent"], 72)
         self.assertEqual(out["recommended_offer_price_inr"], 9_000_000)
 
-    def test_bad_recommendation_falls_back_to_negotiate(self):
-        out = _validate_output({"recommendation": "MAYBE", "confidence_percent": 40})
-        self.assertEqual(out["recommendation"], "NEGOTIATE")
+    def test_off_enum_recommendation_is_reported_not_invented(self):
+        # Used to return NEGOTIATE at 50%, ok:true — an answer the model
+        # never gave, indistinguishable from one it did.
+        with self.assertRaises(ConnectionError) as ctx:
+            _validate_output({"recommendation": "MAYBE", "confidence_percent": 40})
+        self.assertIn("MAYBE", str(ctx.exception))
 
-    def test_confidence_clamped_and_coerced(self):
+    def test_missing_recommendation_is_reported(self):
+        with self.assertRaises(ConnectionError):
+            _validate_output({"confidence_percent": 40})
+
+    def test_missing_or_non_numeric_confidence_is_reported(self):
+        with self.assertRaises(ConnectionError):
+            _validate_output({"recommendation": "BUY"})
+        with self.assertRaises(ConnectionError):
+            _validate_output({"recommendation": "BUY", "confidence_percent": "nope"})
+        with self.assertRaises(ConnectionError):
+            _validate_output({"recommendation": "BUY", "confidence_percent": True})
+
+    def test_confidence_clamped_into_range(self):
+        # A number the model did supply is kept and clamped, not discarded.
         self.assertEqual(_validate_output({"recommendation": "BUY", "confidence_percent": 150})["confidence_percent"], 100)
         self.assertEqual(_validate_output({"recommendation": "BUY", "confidence_percent": -5})["confidence_percent"], 0)
-        self.assertEqual(_validate_output({"recommendation": "BUY", "confidence_percent": "nope"})["confidence_percent"], 50)
+        self.assertEqual(_validate_output({"recommendation": "BUY", "confidence_percent": 72.6})["confidence_percent"], 72)
 
     def test_offer_price_rejects_bool_and_non_numeric(self):
-        self.assertIsNone(_validate_output({"recommendation": "BUY", "recommended_offer_price_inr": True})["recommended_offer_price_inr"])
-        self.assertIsNone(_validate_output({"recommendation": "BUY", "recommended_offer_price_inr": "cheap"})["recommended_offer_price_inr"])
+        base = {"recommendation": "BUY", "confidence_percent": 60}
+        self.assertIsNone(_validate_output({**base, "recommended_offer_price_inr": True})["recommended_offer_price_inr"])
+        self.assertIsNone(_validate_output({**base, "recommended_offer_price_inr": "cheap"})["recommended_offer_price_inr"])
+        self.assertIsNone(_validate_output(base)["recommended_offer_price_inr"])
 
 
 class TestGroqCostMicros(unittest.TestCase):

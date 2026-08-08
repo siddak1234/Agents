@@ -25,6 +25,17 @@ RESIDENTIAL_HINTS = ("apartment", "flat", "villa", "house", "plot", "bhk", "resi
 COMMERCIAL_HINTS = ("commercial", "office space", "shop", "retail", "warehouse", "showroom")
 
 
+def _mentions(text: str, hints: tuple[str, ...]) -> bool:
+    """Whole-word hint match against already-lowercased text.
+
+    Substring matching rejected real homes: "shop" sits inside "Bishop"
+    (Bishop Cotton Road in Bangalore, Bishop Lefroy Road in Kolkata) and
+    inside "workshop", so a residential listing came back
+    invalid_request as though it were a storefront.
+    """
+    return any(re.search(rf"\b{re.escape(hint)}\b", text) for hint in hints)
+
+
 def build_property_profile(
     *,
     property_url: str | None,
@@ -37,7 +48,7 @@ def build_property_profile(
         raise ValueError("either 'property_url' or 'address' is required to identify a property")
 
     lowered = f"{property_url or ''} {address or ''}".lower()
-    if any(hint in lowered for hint in COMMERCIAL_HINTS) and not any(hint in lowered for hint in RESIDENTIAL_HINTS):
+    if _mentions(lowered, COMMERCIAL_HINTS) and not _mentions(lowered, RESIDENTIAL_HINTS):
         raise ValueError("this agent evaluates residential property only")
 
     query = address or property_url
@@ -80,9 +91,11 @@ def build_property_profile(
 
 
 def _infer_property_type(lowered: str) -> str:
-    if "villa" in lowered:
+    # Whole-word for the same reason the residential gate is: "plot" sits
+    # inside "Plotting", "villa" inside "Villanova".
+    if _mentions(lowered, ("villa",)):
         return "Villa"
-    if "plot" in lowered:
+    if _mentions(lowered, ("plot",)):
         return "Plot"
     return "Apartment"
 
@@ -146,14 +159,19 @@ def analyze_financials(
         f"{location} property price per sqft average", timeout=timeout_a
     )
     comparable_prices = _extract_prices_per_sqft(comparable_results)
-    market_avg = statistics.median(comparable_prices) if comparable_prices else resolved_price_per_sqft
+    # No comparables means no market to compare against. Falling back to
+    # the subject property's own price here made every such call report
+    # premium_percent 0.0 / "Fair" at any asking price -- a fabricated
+    # verdict that read exactly like a real one.
+    market_avg = statistics.median(comparable_prices) if comparable_prices else None
 
     if resolved_price_per_sqft is not None and market_avg:
         premium_percent = round(((resolved_price_per_sqft - market_avg) / market_avg) * 100, 1)
         market_value = _classify_market_value(premium_percent)
     else:
-        # No price data supplied at all -- yield/ROI can still be
-        # estimated from the location alone, but market position can't.
+        # Either no price was supplied, or the search turned up nothing
+        # comparable. Yield/ROI still stand on the location alone; market
+        # position is reported as unknown rather than guessed.
         premium_percent = None
         market_value = None
 

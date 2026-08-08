@@ -39,6 +39,11 @@ CAPABILITIES = (
     ("investment_recommendation", "Synthesize prior findings into a BUY/NEGOTIATE/REJECT recommendation."),
 )
 
+#: Capabilities that make no outbound call, so there is no deadline to
+#: divide and no malformed `deadline_ms` worth failing over -- `describe`
+#: is documented as costing nothing and reads neither payload nor budget.
+BUDGET_FREE = frozenset({"describe"})
+
 
 def main() -> int:
     # RULE 1. Do this before anything else can print.
@@ -59,6 +64,7 @@ def main() -> int:
 
 
 def dispatch(raw: str) -> dict[str, Any]:
+    _reset_spend()
     try:
         request = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
@@ -82,8 +88,12 @@ def dispatch(raw: str) -> dict[str, Any]:
         return fail(capability, "invalid_request", f"unknown capability; this agent offers: {declared}")
 
     try:
-        budget = DeadlineBudget.from_deadline_ms(request.get("deadline_ms"))
-        output, usage = handler(payload, budget)
+        budget = (
+            None
+            if capability in BUDGET_FREE
+            else DeadlineBudget.from_deadline_ms(request.get("deadline_ms"))
+        )
+        output = handler(payload, budget)
     except ValueError as exc:
         return fail(capability, "invalid_request", str(exc))
     except TimeoutError as exc:
@@ -93,19 +103,19 @@ def dispatch(raw: str) -> dict[str, Any]:
     except RuntimeError as exc:
         return fail(capability, "unavailable", str(exc), retryable=False)
 
-    return ok(capability, output, usage)
+    return ok(capability, output, _spent_usage())
 
 
 # ---------------------------------------------------------------------------
 # Per-capability handlers. Each one validates the shape of its own input
-# (RULE 4), calls into `analysis` / `recommendation`, and hands back
-# (output, usage). The actual work -- search, scoring, LLM calls -- lives
-# entirely outside this file.
+# (RULE 4), calls into `analysis` / `recommendation`, and returns that
+# capability's output object. What it cost is not threaded back through
+# here -- clients.py records spend as it happens and dispatch reads it
+# once, which is what keeps a post-payment failure honest. The actual work
+# -- search, scoring, LLM calls -- lives entirely outside this file.
 # ---------------------------------------------------------------------------
 
-Handler = Callable[
-    [dict[str, Any], DeadlineBudget], "tuple[dict[str, Any], dict[str, int]]"
-]
+Handler = Callable[[dict[str, Any], "DeadlineBudget | None"], dict[str, Any]]
 
 
 def _require_str(payload: dict[str, Any], key: str, *, required: bool = True) -> str | None:
@@ -140,20 +150,20 @@ def _require_object(payload: dict[str, Any], key: str) -> dict[str, Any] | None:
 
 
 def _handle_describe(
-    payload: dict[str, Any], budget: DeadlineBudget
-) -> tuple[dict[str, Any], dict[str, int]]:
+    payload: dict[str, Any], budget: DeadlineBudget | None
+) -> dict[str, Any]:
     del payload, budget
     output = {
         "name": AGENT_NAME,
         "protocol": PROTOCOL,
         "capabilities": [{"name": n, "description": d} for n, d in CAPABILITIES],
     }
-    return output, zero_usage()
+    return output
 
 
 def _handle_property_intelligence(
-    payload: dict[str, Any], budget: DeadlineBudget
-) -> tuple[dict[str, Any], dict[str, int]]:
+    payload: dict[str, Any], budget: DeadlineBudget | None
+) -> dict[str, Any]:
     from analysis import build_property_profile  # RULE 6: imported only when this capability runs
 
     output = build_property_profile(
@@ -163,12 +173,12 @@ def _handle_property_intelligence(
         area_sqft=_require_number(payload, "area_sqft", required=False),
         budget=budget,
     )
-    return output, zero_usage()
+    return output
 
 
 def _handle_financial_analysis(
-    payload: dict[str, Any], budget: DeadlineBudget
-) -> tuple[dict[str, Any], dict[str, int]]:
+    payload: dict[str, Any], budget: DeadlineBudget | None
+) -> dict[str, Any]:
     from analysis import analyze_financials
 
     output = analyze_financials(
@@ -178,21 +188,21 @@ def _handle_financial_analysis(
         area_sqft=_require_number(payload, "area_sqft", required=False),
         budget=budget,
     )
-    return output, zero_usage()
+    return output
 
 
 def _handle_location_infrastructure_analysis(
-    payload: dict[str, Any], budget: DeadlineBudget
-) -> tuple[dict[str, Any], dict[str, int]]:
+    payload: dict[str, Any], budget: DeadlineBudget | None
+) -> dict[str, Any]:
     from analysis import analyze_location
 
     output = analyze_location(location=_require_str(payload, "location"), budget=budget)
-    return output, zero_usage()
+    return output
 
 
 def _handle_risk_assessment(
-    payload: dict[str, Any], budget: DeadlineBudget
-) -> tuple[dict[str, Any], dict[str, int]]:
+    payload: dict[str, Any], budget: DeadlineBudget | None
+) -> dict[str, Any]:
     from analysis import assess_risk
 
     output = assess_risk(
@@ -201,15 +211,15 @@ def _handle_risk_assessment(
         property_type=_require_str(payload, "property_type", required=False),
         budget=budget,
     )
-    return output, zero_usage()
+    return output
 
 
 def _handle_investment_recommendation(
-    payload: dict[str, Any], budget: DeadlineBudget
-) -> tuple[dict[str, Any], dict[str, int]]:
+    payload: dict[str, Any], budget: DeadlineBudget | None
+) -> dict[str, Any]:
     from recommendation import recommend
 
-    output, usage = recommend(
+    output = recommend(
         property_intelligence=_require_object(payload, "property_intelligence"),
         financial_analysis=_require_object(payload, "financial_analysis"),
         location_infrastructure_analysis=_require_object(
@@ -222,7 +232,7 @@ def _handle_investment_recommendation(
         asking_price_inr=_require_number(payload, "asking_price_inr", required=False),
         budget=budget,
     )
-    return output, usage
+    return output
 
 
 HANDLERS: dict[str, Handler] = {
@@ -249,13 +259,39 @@ def ok(capability: str, output: dict[str, Any], usage: dict[str, int]) -> dict[s
 def fail(capability: str, etype: str, message: str, *, retryable: bool = False) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL, "ok": False, "capability": capability,
-        "output": None, "usage": zero_usage(),
+        "output": None, "usage": _spent_usage(),
         "error": {"type": etype, "message": message, "retryable": retryable},
     }
 
 
 def zero_usage() -> dict[str, int]:
     return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+
+
+# ---------------------------------------------------------------------------
+# Spend. Tavily bills per search and returns no tokens, so the four search
+# capabilities have a real `cost_micros` and no token counts at all. Both
+# helpers reach clients.py through `sys.modules` rather than importing it:
+# a module `describe` never loaded cannot have spent anything, and asking
+# through the module table keeps that path free of clients.py entirely
+# (RULE 6, the same reason the capability imports are lazy).
+# ---------------------------------------------------------------------------
+
+def _reset_spend() -> None:
+    clients = sys.modules.get("clients")
+    if clients is not None:
+        clients.reset_spend()
+
+
+def _spent_usage() -> dict[str, int]:
+    """What this request spent, read once where the envelope is built.
+
+    Both success and failure go through here, so a request that paid for
+    two searches and then timed out reports those two searches --
+    docs/AGENT_PROTOCOL.md zeroes `usage` only when nothing was spent.
+    """
+    clients = sys.modules.get("clients")
+    return clients.spent_usage() if clients is not None else zero_usage()
 
 
 if __name__ == "__main__":
