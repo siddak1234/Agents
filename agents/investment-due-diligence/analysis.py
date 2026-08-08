@@ -1,28 +1,47 @@
 """Capabilities 1-4: Property Intelligence, Financial Analysis,
 Location & Infrastructure Analysis, Risk Assessment.
 
-Plain functions -- no protocol/envelope knowledge here. Bad input raises
-ValueError; a missing key or an unreachable/failing dependency raises
-whatever clients.py raised (RuntimeError / ConnectionError / TimeoutError)
-straight through, uncaught, for agent_main.py to turn into an envelope.
+Each is one Claude call: it researches the question with web search and
+reports through a tool whose schema mirrors that capability's
+`output_schema` in agent.yaml.
+
+What stays deterministic here is everything that is *not* analysis —
+validating the caller's input, deriving price per square foot, minting a
+property id. Those have one right answer and belong in code. Judgment about
+a locality's prospects does not, and asking a model to search for it beats
+regexes over search snippets, which is what this file used to do.
+
+Bad input raises ValueError; anything clients.py raises passes straight
+through, uncaught, for agent_main.py to turn into an envelope.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-import statistics
 from typing import Any
 
 from budget import DeadlineBudget
-from clients import geocode, tavily_search
+from clients import research
 
-# ---------------------------------------------------------------------------
-# Capability 1 -- Property Intelligence
-# ---------------------------------------------------------------------------
+SYSTEM = (
+    "You are a conservative residential real-estate analyst covering the Indian "
+    "market. All prices are INR. Research the question with web search before "
+    "answering — current listing rates, civic and infrastructure news, and "
+    "builder track record are exactly the things your training data is stale "
+    "on. Prefer recent, named sources over general impressions.\n\n"
+    "Report only what your sources support. Where the evidence does not settle "
+    "a field, return null for it rather than a plausible-looking guess; a "
+    "confident wrong number is worse than an honest gap. Note the limits of "
+    "what you found rather than filling them in. Then report by calling the "
+    "tool you were given, exactly once."
+)
 
 RESIDENTIAL_HINTS = ("apartment", "flat", "villa", "house", "plot", "bhk", "residential")
 COMMERCIAL_HINTS = ("commercial", "office space", "shop", "retail", "warehouse", "showroom")
+
+#: Scores are 0-10 throughout, matching agent.yaml.
+_SCORE = {"type": "number", "minimum": 0, "maximum": 10}
 
 
 def _mentions(text: str, hints: tuple[str, ...]) -> bool:
@@ -30,10 +49,46 @@ def _mentions(text: str, hints: tuple[str, ...]) -> bool:
 
     Substring matching rejected real homes: "shop" sits inside "Bishop"
     (Bishop Cotton Road in Bangalore, Bishop Lefroy Road in Kolkata) and
-    inside "workshop", so a residential listing came back
-    invalid_request as though it were a storefront.
+    inside "workshop", so a residential listing came back invalid_request as
+    though it were a storefront.
     """
     return any(re.search(rf"\b{re.escape(hint)}\b", text) for hint in hints)
+
+
+def _timeout(budget: DeadlineBudget | None, calls_left: int = 1) -> float:
+    return budget.for_call(calls_left) if budget is not None else 90.0
+
+
+# ---------------------------------------------------------------------------
+# Capability 1 -- Property Intelligence
+# ---------------------------------------------------------------------------
+
+PROPERTY_TOOL: dict[str, Any] = {
+    "name": "record_property_profile",
+    "description": "Record the verified profile of this residential property.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "builder": {
+                "type": ["string", "null"],
+                "description": "Developer or project name, or null if not established.",
+            },
+            "property_type": {
+                "type": "string",
+                "description": "Apartment, Villa, Plot, or another concrete type.",
+            },
+            "configuration": {
+                "type": ["string", "null"],
+                "description": 'Unit configuration such as "3BHK", or null.',
+            },
+            "location": {
+                "type": "string",
+                "description": "Locality and city, as a caller would recognise it.",
+            },
+        },
+        "required": ["property_type", "location"],
+    },
+}
 
 
 def build_property_profile(
@@ -51,146 +106,36 @@ def build_property_profile(
     if _mentions(lowered, COMMERCIAL_HINTS) and not _mentions(lowered, RESIDENTIAL_HINTS):
         raise ValueError("this agent evaluates residential property only")
 
-    query = address or property_url
-    results: list[dict[str, Any]] = []
-    if query:
-        try:
-            # Best-effort corroboration only -- a missing key or a search
-            # miss doesn't make the property unidentifiable, so fall back
-            # to what the caller told us instead of failing the request.
-            timeout = budget.for_call(1) if budget is not None else 12.0
-            results = tavily_search(f"{query} builder property details", timeout=timeout)
-        except Exception:
-            results = []
-
-    builder = _extract_builder(address or "", results)
-    configuration = _extract_configuration(lowered)
-    property_type = _infer_property_type(lowered)
-    location = _extract_location(address, results)
-
-    if not location:
-        raise ValueError("could not determine a location for this property; provide 'address'")
-
-    # Same exclusiveMinimum: 0 rule as financial_analysis / agent.yaml — a
-    # negative asking price used to slip through and yield a negative
-    # price_per_sqft because this path only checked truthiness.
+    # Same exclusiveMinimum: 0 rule as agent.yaml, checked before anything is
+    # billed: a negative price is the caller's mistake, not a research task.
     price_per_sqft = _resolve_price_per_sqft(
         price_per_sqft=None, asking_price_inr=asking_price_inr, area_sqft=area_sqft
     )
 
-    property_id = "prop_" + hashlib.sha1((property_url or address or "").encode("utf-8")).hexdigest()[:10]
+    recorded = research(
+        system=SYSTEM,
+        prompt=(
+            "Identify this residential property and report its profile.\n"
+            f"Address: {address or '(not supplied)'}\n"
+            f"Listing URL: {property_url or '(not supplied)'}\n"
+            "Establish the developer or project name, the property type, the "
+            "unit configuration, and the locality. Leave a field null if your "
+            "sources do not establish it."
+        ),
+        tool=PROPERTY_TOOL,
+        timeout=_timeout(budget),
+    )
 
     return {
-        "property_id": property_id,
-        "builder": builder,
-        "property_type": property_type,
-        "configuration": configuration,
-        "location": location,
+        # Minted here, not asked of the model: an id must be stable for the
+        # same input, and a model has no way to guarantee that.
+        "property_id": "prop_"
+        + hashlib.sha1((property_url or address or "").encode("utf-8")).hexdigest()[:10],
+        "builder": recorded.get("builder"),
+        "property_type": recorded.get("property_type"),
+        "configuration": recorded.get("configuration"),
+        "location": recorded.get("location"),
         "price_per_sqft": price_per_sqft,
-    }
-
-
-def _infer_property_type(lowered: str) -> str:
-    # Whole-word for the same reason the residential gate is: "plot" sits
-    # inside "Plotting", "villa" inside "Villanova".
-    if _mentions(lowered, ("villa",)):
-        return "Villa"
-    if _mentions(lowered, ("plot",)):
-        return "Plot"
-    return "Apartment"
-
-
-def _extract_builder(address: str, results: list[dict[str, Any]]) -> str | None:
-    # In Indian listings the builder/project name is often the first
-    # comma-separated segment of the address, e.g. "Prestige Lakeside
-    # Habitat, Whitefield, Bangalore".
-    first_segment = address.split(",", maxsplit=1)[0].strip() if address else ""
-    if first_segment and len(first_segment.split()) <= 6:
-        return first_segment
-    for result in results:
-        title = result.get("title", "") if isinstance(result, dict) else ""
-        match = re.search(r"by ([A-Z][\w&. ]{2,40}?)(?:\s*[-|,]|$)", title)
-        if match:
-            return match.group(1).strip()
-    return None
-
-
-def _extract_configuration(lowered: str) -> str | None:
-    match = re.search(r"(\d)\s*bhk", lowered)
-    return f"{match.group(1)}BHK" if match else None
-
-
-def _extract_location(address: str | None, results: list[dict[str, Any]]) -> str | None:
-    if address:
-        parts = [p.strip() for p in address.split(",") if p.strip()]
-        if len(parts) >= 2:
-            return ", ".join(parts[-2:])
-        if parts:
-            return parts[-1]
-    for result in results:
-        title = result.get("title", "") if isinstance(result, dict) else ""
-        if title:
-            return title
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Capability 2 -- Financial Analysis
-# ---------------------------------------------------------------------------
-
-DEFAULT_RENTAL_YIELD_PERCENT = 3.0
-ASSUMED_ANNUAL_APPRECIATION_PERCENT = 8.0
-
-
-def analyze_financials(
-    *,
-    location: str,
-    price_per_sqft: float | None = None,
-    asking_price_inr: float | None = None,
-    area_sqft: float | None = None,
-    budget: DeadlineBudget | None = None,
-) -> dict[str, Any]:
-    resolved_price_per_sqft = _resolve_price_per_sqft(
-        price_per_sqft=price_per_sqft, asking_price_inr=asking_price_inr, area_sqft=area_sqft
-    )
-
-    timeout_a = budget.for_call(2) if budget is not None else 12.0
-    comparable_results = tavily_search(
-        f"{location} property price per sqft average", timeout=timeout_a
-    )
-    comparable_prices = _extract_prices_per_sqft(comparable_results)
-    # No comparables means no market to compare against. Falling back to
-    # the subject property's own price here made every such call report
-    # premium_percent 0.0 / "Fair" at any asking price -- a fabricated
-    # verdict that read exactly like a real one.
-    market_avg = statistics.median(comparable_prices) if comparable_prices else None
-
-    if resolved_price_per_sqft is not None and market_avg:
-        premium_percent = round(((resolved_price_per_sqft - market_avg) / market_avg) * 100, 1)
-        market_value = _classify_market_value(premium_percent)
-    else:
-        # Either no price was supplied, or the search turned up nothing
-        # comparable. Yield/ROI still stand on the location alone; market
-        # position is reported as unknown rather than guessed.
-        premium_percent = None
-        market_value = None
-
-    timeout_b = budget.for_call(1) if budget is not None else 12.0
-    rental_results = tavily_search(
-        f"{location} monthly rental yield apartment", timeout=timeout_b
-    )
-    rental_yield = _extract_rental_yield(rental_results) or DEFAULT_RENTAL_YIELD_PERCENT
-
-    price_penalty = max(premium_percent, 0) if premium_percent is not None else 0
-    roi = round(rental_yield + ASSUMED_ANNUAL_APPRECIATION_PERCENT - price_penalty * 0.2, 1)
-    financial_score = _score_financials(premium_percent, rental_yield, roi)
-
-    return {
-        "market_value": market_value,
-        "premium_percent": premium_percent,
-        "estimated_rental_yield_percent": round(rental_yield, 1),
-        "estimated_roi_percent": roi,
-        "financial_score": financial_score,
     }
 
 
@@ -212,142 +157,202 @@ def _resolve_price_per_sqft(
     return None
 
 
-def _classify_market_value(premium_percent: float) -> str:
-    if premium_percent <= -5:
-        return "Undervalued"
-    if premium_percent <= 8:
-        return "Fair"
-    return "Overvalued"
+# ---------------------------------------------------------------------------
+# Capability 2 -- Financial Analysis
+# ---------------------------------------------------------------------------
+
+FINANCIAL_TOOL: dict[str, Any] = {
+    "name": "record_financial_analysis",
+    "description": "Record the financial position of this property against its locality.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "market_value": {
+                "type": ["string", "null"],
+                "enum": ["Undervalued", "Fair", "Overvalued", None],
+                "description": (
+                    "Position against comparable rates. Null when no comparable "
+                    "rate was found, or no price was supplied to compare."
+                ),
+            },
+            "premium_percent": {
+                "type": ["number", "null"],
+                "description": (
+                    "Percent above (positive) or below (negative) the comparable "
+                    "rate. Null whenever market_value is null."
+                ),
+            },
+            "estimated_rental_yield_percent": {
+                "type": "number",
+                "description": "Gross annual rental yield for the locality, in percent.",
+            },
+            "estimated_roi_percent": {
+                "type": "number",
+                "description": "Estimated annual return including expected appreciation.",
+            },
+            "financial_score": dict(_SCORE, description="Financial attractiveness, 0-10."),
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Short notes on what the figures rest on, and any gaps.",
+            },
+        },
+        "required": ["estimated_rental_yield_percent", "estimated_roi_percent", "financial_score"],
+    },
+}
 
 
-def _extract_prices_per_sqft(results: list[dict[str, Any]]) -> list[float]:
-    prices: list[float] = []
-    for result in results:
-        if not isinstance(result, dict):
-            continue
-        text = f"{result.get('title', '')} {result.get('content', '')}"
-        for match in re.finditer(r"(?:rs\.?|inr|₹)\s?([\d,]{3,7})\s*(?:/|per)\s*sq", text, re.IGNORECASE):
-            try:
-                prices.append(float(match.group(1).replace(",", "")))
-            except ValueError:
-                continue
-    return prices
-
-
-def _extract_rental_yield(results: list[dict[str, Any]]) -> float | None:
-    for result in results:
-        if not isinstance(result, dict):
-            continue
-        text = f"{result.get('title', '')} {result.get('content', '')}"
-        match = re.search(r"([\d.]{1,4})\s*%\s*(?:rental )?yield", text, re.IGNORECASE)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-    return None
-
-
-def _score_financials(premium_percent: float | None, rental_yield: float, roi: float) -> float:
-    score = 5.0
-    if premium_percent is not None:
-        score -= max(premium_percent, 0) * 0.15
-        score += max(-premium_percent, 0) * 0.1
-    score += (rental_yield - DEFAULT_RENTAL_YIELD_PERCENT) * 0.5
-    score += (roi - 10) * 0.1
-    return round(min(max(score, 0.0), 10.0), 1)
+def analyze_financials(
+    *,
+    location: str,
+    price_per_sqft: float | None = None,
+    asking_price_inr: float | None = None,
+    area_sqft: float | None = None,
+    budget: DeadlineBudget | None = None,
+) -> dict[str, Any]:
+    resolved = _resolve_price_per_sqft(
+        price_per_sqft=price_per_sqft, asking_price_inr=asking_price_inr, area_sqft=area_sqft
+    )
+    asking = (
+        f"{resolved} INR per sqft" if resolved is not None else "(no asking price supplied)"
+    )
+    recorded = research(
+        system=SYSTEM,
+        prompt=(
+            f"Assess the financial attractiveness of residential property in {location}.\n"
+            f"This property's asking rate: {asking}\n"
+            "Find current comparable per-square-foot rates for the locality and "
+            "the prevailing gross rental yield. Report where this property sits "
+            "against those comparables. If you cannot find a comparable rate, or "
+            "no asking rate was supplied, return market_value and "
+            "premium_percent as null rather than estimating them."
+        ),
+        tool=FINANCIAL_TOOL,
+        timeout=_timeout(budget),
+    )
+    return {
+        "market_value": recorded.get("market_value"),
+        "premium_percent": recorded.get("premium_percent"),
+        "estimated_rental_yield_percent": recorded.get("estimated_rental_yield_percent"),
+        "estimated_roi_percent": recorded.get("estimated_roi_percent"),
+        "financial_score": recorded.get("financial_score"),
+        "evidence": recorded.get("evidence", []),
+    }
 
 
 # ---------------------------------------------------------------------------
 # Capability 3 -- Location & Infrastructure Analysis
 # ---------------------------------------------------------------------------
 
-GROWTH_KEYWORDS_HIGH = ("metro", "it corridor", "sez", "ring road", "expressway", "airport")
-GROWTH_KEYWORDS_MEDIUM = ("upcoming", "planned", "proposed")
-CONNECTIVITY_KEYWORDS = ("metro", "highway", "airport", "railway", "bus")
-AMENITY_KEYWORDS = ("school", "hospital", "mall", "market", "restaurant")
+LOCATION_TOOL: dict[str, Any] = {
+    "name": "record_location_analysis",
+    "description": "Record connectivity, amenities and growth outlook for a locality.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "connectivity_score": dict(_SCORE, description="Transport connectivity, 0-10."),
+            "amenities_score": dict(_SCORE, description="Schools, healthcare, retail, 0-10."),
+            "growth_potential": {
+                "type": "string",
+                "enum": ["Low", "Medium", "High"],
+                "description": "Long-term growth outlook.",
+            },
+            "planned_infrastructure": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Named projects announced or under construction.",
+            },
+            "location_score": dict(_SCORE, description="Overall locality quality, 0-10."),
+            "coordinates": {
+                "type": ["object", "null"],
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                },
+                "description": "Approximate centre of the locality, or null.",
+            },
+        },
+        "required": [
+            "connectivity_score",
+            "amenities_score",
+            "growth_potential",
+            "location_score",
+        ],
+    },
+}
 
 
 def analyze_location(*, location: str, budget: DeadlineBudget | None = None) -> dict[str, Any]:
     if not location or not location.strip():
         raise ValueError("'location' must be a non-empty string")
 
-    # Best-effort corroboration that the locality is a real, resolvable
-    # place. No key required (OpenStreetMap/Nominatim), and a miss never
-    # fails the capability -- it just means coordinates come back null.
-    # Three outbound calls share the deadline: geocode + two Tavily searches.
-    geo_timeout = budget.for_call(3) if budget is not None else 8.0
-    coordinates = geocode(location, timeout=geo_timeout)
-
-    infra_timeout = budget.for_call(2) if budget is not None else 12.0
-    infra_results = tavily_search(
-        f"{location} upcoming infrastructure metro road development", timeout=infra_timeout
+    recorded = research(
+        system=SYSTEM,
+        prompt=(
+            f"Assess {location} as a place to own a home.\n"
+            "Cover transport connectivity, everyday amenities, and infrastructure "
+            "that is announced or under construction. Name the specific projects "
+            "you find and say whether each is proposed, approved or building — a "
+            "project that has been announced for a decade is not growth."
+        ),
+        tool=LOCATION_TOOL,
+        timeout=_timeout(budget),
     )
-    amenity_timeout = budget.for_call(1) if budget is not None else 12.0
-    amenity_results = tavily_search(
-        f"{location} connectivity schools hospitals malls", timeout=amenity_timeout
-    )
-
-    planned_infrastructure = _extract_infrastructure(infra_results)
-    connectivity_score = _keyword_score(amenity_results, CONNECTIVITY_KEYWORDS)
-    amenities_score = _keyword_score(amenity_results, AMENITY_KEYWORDS)
-    growth_potential = _classify_growth(infra_results)
-
-    bonus = {"High": 1.0, "Medium": 0.3, "Low": 0.0}[growth_potential]
-    location_score = round(min((connectivity_score + amenities_score) / 2 + bonus, 10.0), 1)
-
     return {
-        "connectivity_score": connectivity_score,
-        "amenities_score": amenities_score,
-        "growth_potential": growth_potential,
-        "planned_infrastructure": planned_infrastructure,
-        "location_score": location_score,
-        "coordinates": coordinates,
+        "connectivity_score": recorded.get("connectivity_score"),
+        "amenities_score": recorded.get("amenities_score"),
+        "growth_potential": recorded.get("growth_potential"),
+        "planned_infrastructure": recorded.get("planned_infrastructure", []),
+        "location_score": recorded.get("location_score"),
+        "coordinates": recorded.get("coordinates"),
     }
-
-
-def _classify_growth(results: list[dict[str, Any]]) -> str:
-    text = _joined_text(results).lower()
-    if any(k in text for k in GROWTH_KEYWORDS_HIGH):
-        return "High"
-    if any(k in text for k in GROWTH_KEYWORDS_MEDIUM):
-        return "Medium"
-    return "Low"
-
-
-def _keyword_score(results: list[dict[str, Any]], keywords: tuple[str, ...]) -> float:
-    text = _joined_text(results).lower()
-    hits = sum(1 for k in keywords if k in text)
-    return round(min(5.0 + hits * 1.0, 10.0), 1)
-
-
-def _extract_infrastructure(results: list[dict[str, Any]]) -> list[str]:
-    found: set[str] = set()
-    for result in results:
-        if not isinstance(result, dict):
-            continue
-        text = f"{result.get('title', '')} {result.get('content', '')}"
-        for match in re.finditer(
-            r"([A-Z][\w ]{2,30}(?:Metro|Expressway|Ring Road|Corridor|Line|Phase\s?\d*))", text
-        ):
-            found.add(match.group(1).strip())
-    return sorted(found)[:5]
-
-
-def _joined_text(results: list[dict[str, Any]]) -> str:
-    return " ".join(
-        f"{r.get('title', '')} {r.get('content', '')}" for r in results if isinstance(r, dict)
-    )
 
 
 # ---------------------------------------------------------------------------
 # Capability 4 -- Risk Assessment
 # ---------------------------------------------------------------------------
 
-NEGATIVE_BUILDER_KEYWORDS = ("delay", "delayed", "fraud", "litigation", "case", "dispute", "cheat", "complaint", "scam")
-FLOOD_KEYWORDS = ("flood", "waterlog", "waterlogging", "low-lying")
-MARKET_SLOWDOWN_KEYWORDS = ("slowdown", "oversupply", "decline", "stagnant")
-RISK_RANK = {"Low": 0, "Medium": 1, "High": 2}
+RISK_LEVELS = ["Low", "Medium", "High"]
+
+RISK_TOOL: dict[str, Any] = {
+    "name": "record_risk_assessment",
+    "description": "Record builder, environmental and market risk for this property.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "builder_legal_risk": {
+                "type": "string",
+                "enum": RISK_LEVELS,
+                "description": "Delivery, litigation and track-record risk.",
+            },
+            "environmental_risk": {
+                "type": "string",
+                "enum": RISK_LEVELS,
+                "description": "Flooding, waterlogging and similar locality risk.",
+            },
+            "market_risk": {
+                "type": "string",
+                "enum": RISK_LEVELS,
+                "description": "Oversupply or slowdown risk in this locality.",
+            },
+            "overall_risk": {
+                "type": "string",
+                "enum": RISK_LEVELS,
+                "description": "The level a buyer should act on.",
+            },
+            "identified_risks": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "One short line per concrete finding, and per thing you could "
+                    "not verify. An absence of evidence is a limitation, not a "
+                    "clean record — say which you found."
+                ),
+            },
+        },
+        "required": ["builder_legal_risk", "environmental_risk", "market_risk", "overall_risk"],
+    },
+}
 
 
 def assess_risk(
@@ -360,93 +365,26 @@ def assess_risk(
     if not location or not location.strip():
         raise ValueError("'location' is required")
 
-    identified_risks: list[str] = []
-    if not property_type:
-        identified_risks.append("property type not supplied; type-specific risk factors were not checked")
-
-    # Three Tavily searches share the deadline (builder + environment + market).
-    if builder:
-        builder_results = tavily_search(
-            f"{builder} builder complaints litigation reviews",
-            timeout=budget.for_call(3) if budget is not None else 12.0,
-        )
-    else:
-        # Still confirms the key is configured even with no builder to
-        # search for, so this fails `unavailable` (not a false "Low
-        # risk") when TAVILY_API_KEY is missing.
-        tavily_search(
-            f"{location} real estate builder track record",
-            timeout=budget.for_call(3) if budget is not None else 12.0,
-        )
-        builder_results = []
-
-    builder_hits = _count_keyword_hits(builder_results, NEGATIVE_BUILDER_KEYWORDS)
-    if not builder:
-        builder_legal_risk = "Medium"
-        identified_risks.append("builder could not be identified; legal/track-record risk could not be verified")
-    else:
-        builder_legal_risk = "High" if builder_hits >= 3 else "Medium" if builder_hits >= 1 else "Low"
-        if builder_hits:
-            identified_risks.append(f"{builder_hits} negative signal(s) found for the builder in public search results")
-
-    env_results = tavily_search(
-        f"{location} flooding environmental risk",
-        timeout=budget.for_call(2) if budget is not None else 12.0,
+    recorded = research(
+        system=SYSTEM,
+        prompt=(
+            f"Assess the risks of buying residential property in {location}.\n"
+            f"Developer: {builder or '(not supplied)'}\n"
+            f"Property type: {property_type or '(not supplied)'}\n"
+            "Cover the developer's delivery and litigation record, the "
+            "locality's flooding and environmental history, and whether the "
+            "local market shows oversupply or slowdown. Read claims in context: "
+            "coverage stating a locality has no flooding history is not a flood "
+            "risk. Where you could not verify something, record that as a "
+            "limitation rather than treating it as an all-clear."
+        ),
+        tool=RISK_TOOL,
+        timeout=_timeout(budget),
     )
-    flood_hits = _count_keyword_hits(env_results, FLOOD_KEYWORDS)
-    environmental_risk = "High" if flood_hits >= 2 else "Medium" if flood_hits >= 1 else "Low"
-    if flood_hits:
-        identified_risks.append("locality has reported flooding or waterlogging history")
-
-    market_results = tavily_search(
-        f"{location} real estate market slowdown oversupply",
-        timeout=budget.for_call(1) if budget is not None else 12.0,
-    )
-    market_hits = _count_keyword_hits(market_results, MARKET_SLOWDOWN_KEYWORDS)
-    market_risk = "High" if market_hits >= 2 else "Medium" if market_hits >= 1 else "Low"
-    if market_hits:
-        identified_risks.append("locality market shows signs of slowdown or oversupply in recent coverage")
-
-    overall_risk = _combine_risk_levels([builder_legal_risk, environmental_risk, market_risk])
-
     return {
-        "builder_legal_risk": builder_legal_risk,
-        "environmental_risk": environmental_risk,
-        "market_risk": market_risk,
-        "overall_risk": overall_risk,
-        "identified_risks": identified_risks,
+        "builder_legal_risk": recorded.get("builder_legal_risk"),
+        "environmental_risk": recorded.get("environmental_risk"),
+        "market_risk": recorded.get("market_risk"),
+        "overall_risk": recorded.get("overall_risk"),
+        "identified_risks": recorded.get("identified_risks", []),
     }
-
-
-#: Cues that flip a risk keyword's meaning. Coverage reading "no oversupply"
-#: or "no flooding reported" used to score exactly like coverage reporting
-#: the opposite, and identified_risks then asserted a history the source
-#: denied. Deliberately small: this reads a few words back for a negation,
-#: it is not sentiment analysis, and "no doubt there is a slowdown" will
-#: still be read as negated.
-NEGATION_CUES = ("no", "not", "never", "without", "free of", "free from")
-_NEGATED = re.compile(r"\b(?:" + "|".join(NEGATION_CUES) + r")\b[^.;!?]{0,24}$")
-
-
-def _count_keyword_hits(results: list[dict[str, Any]], keywords: tuple[str, ...]) -> int:
-    text = _joined_text(results).lower()
-    return sum(1 for k in keywords if _asserted(text, k))
-
-
-def _asserted(text: str, keyword: str) -> bool:
-    """True if `keyword` appears at least once without a negation before it.
-
-    Matching starts on a word boundary but does not end on one, so "waterlog"
-    still catches "waterlogging" while "case" no longer fires on "showcase".
-    """
-    for match in re.finditer(rf"\b{re.escape(keyword)}", text):
-        if not _NEGATED.search(text[max(0, match.start() - 40) : match.start()]):
-            return True
-    return False
-
-
-def _combine_risk_levels(levels: list[str]) -> str:
-    highs = sum(1 for lvl in levels if lvl == "High")
-    if highs >= 2:
-        return "High"
-    return max(levels, key=lambda lvl: RISK_RANK[lvl])

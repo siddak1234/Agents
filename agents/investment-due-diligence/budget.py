@@ -1,6 +1,6 @@
 """Per-request time budget derived from agentcall `deadline_ms`.
 
-Sequential outbound calls (Tavily, Nominatim, Groq) share one clock: each
+Sequential outbound calls share one clock: each
 call takes a slice of whatever time is left so a capability with 2-3
 searches cannot schedule 15s x N against a 30s deadline.
 """

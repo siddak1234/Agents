@@ -1,22 +1,19 @@
-"""Composition tests: the wiring between the helpers, and the envelope.
+"""Capability wiring, the client, and the envelope.
 
-`test_scoring.py` covers the pure helpers one at a time. Everything those
-helpers are *plugged into* -- which search feeds which score, which
-arguments go where, what reaches `usage` -- used to be reachable only with
-a Tavily or Groq key, so the whole layer went untested and mutations to it
-survived a green suite.
+The agent's judgment now lives in Claude, so these tests do not assert what
+a good answer looks like — that is not knowable offline. They assert the
+parts that are still ours and still deterministic:
 
-Two stubbing depths are used here, deliberately:
+* input validation, which rejects a caller's mistake before anything is billed
+* the tool each capability asks Claude to fill in
+* the mapping from the tool's arguments onto the published output schema
+* the client: usage recording, `pause_turn` resumption, and which failure
+  becomes which envelope
 
-* `analysis.tavily_search` is replaced directly where the assertion is
-  about scoring composition.
-* `urllib.request.urlopen` is replaced where the assertion is about the
-  envelope, so the real `tavily_search`/`groq_tool_call`, the real error
-  mapping and the real spend tally all run.
-
-Both mean no network and no credentials. The fake keys below never reach a
-socket because the transport itself is replaced -- a real key cannot leak
-in either, since these set `os.environ` explicitly rather than reading it.
+Two stubbing depths, both offline. `analysis.research` /
+`recommendation.research` are replaced where the assertion is about a
+capability; a fake SDK client is injected where it is about `clients`
+itself. No network, no key.
 """
 
 from __future__ import annotations
@@ -24,8 +21,8 @@ from __future__ import annotations
 import json
 import sys
 import unittest
-import urllib.error
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -36,545 +33,377 @@ import clients
 import recommendation
 from recommendation import RECOMMENDATION_TOOL, RECOMMENDATION_TOOL_NAME
 
-FAKE_KEYS = {"TAVILY_API_KEY": "stub-not-a-real-key", "GROQ_API_KEY": "stub-not-a-real-key"}
+FAKE_KEY = {"ANTHROPIC_API_KEY": "stub-not-a-real-key"}
 
 
-def _hit(title: str = "", content: str = "") -> dict:
-    return {"title": title, "content": content}
+def _capture(answer: dict):
+    """Stands in for `research`, recording what it was asked."""
+    seen: dict = {}
+
+    def _fake(*, system: str, prompt: str, tool: dict, timeout: float = 90.0) -> dict:
+        seen.update(system=system, prompt=prompt, tool=tool, timeout=timeout)
+        return answer
+
+    return seen, _fake
 
 
-def _results(*hits: dict) -> dict:
-    return {"results": list(hits)}
-
-
-def _groq_payload(arguments: dict, *, name: str = RECOMMENDATION_TOOL_NAME) -> dict:
-    """A Groq chat-completions response carrying one forced tool call."""
-    return {
-        "choices": [
-            {
-                "message": {
-                    "tool_calls": [
-                        {"function": {"name": name, "arguments": json.dumps(arguments)}}
-                    ]
-                }
-            }
-        ],
-        "usage": {"prompt_tokens": 259, "completion_tokens": 88},
+class TestPropertyIntelligence(unittest.TestCase):
+    ANSWER: ClassVar[dict] = {
+        "builder": "Prestige",
+        "property_type": "Apartment",
+        "configuration": "3BHK",
+        "location": "Whitefield, Bangalore",
     }
 
-
-class _FakeResponse:
-    def __init__(self, payload: object) -> None:
-        self._raw = json.dumps(payload).encode("utf-8")
-
-    def read(self) -> bytes:
-        return self._raw
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-
-class _Transport:
-    """Stands in for urlopen, routing on the URL and the posted query."""
-
-    def __init__(self, routes: list[tuple[str, object]]) -> None:
-        #: (fragment matched against url+body, payload | Exception to raise)
-        self.routes = routes
-        self.calls: list[str] = []
-
-    def __call__(self, request: object, timeout: float | None = None) -> _FakeResponse:
-        url = request.full_url
-        body = request.data.decode("utf-8") if request.data else ""
-        self.calls.append(url)
-        for fragment, payload in self.routes:
-            if fragment in url or fragment in body:
-                if isinstance(payload, Exception):
-                    raise payload
-                return _FakeResponse(payload)
-        raise AssertionError(f"no route for {url} / {body[:120]}")
-
-
-def _dispatch(capability: str, payload: dict, transport: _Transport) -> dict:
-    request = json.dumps(
-        {"protocol": "agentcall/v1", "capability": capability, "input": payload}
-    )
-    with (
-        mock.patch.dict("os.environ", FAKE_KEYS, clear=False),
-        mock.patch("urllib.request.urlopen", transport),
-    ):
-        return agent_main.dispatch(request)
-
-
-# ---------------------------------------------------------------------------
-# Scoring composition -- which search feeds which score.
-# ---------------------------------------------------------------------------
-
-
-class TestFinancialComposition(unittest.TestCase):
-    COMPARABLES = _results(
-        _hit("Locality rates", "Average Rs. 8,000 / sqft in the area"),
-        _hit("Nearby listings", "Going rate ₹10,000 per sqft near the lake"),
-        _hit("Quarterly report", "INR 9,000/sq.ft reported last quarter"),
-    )
-    RENTALS = _results(_hit("Rental market", "Area averages 3.5% rental yield"))
-
-    def _search(self, query: str, **_: object) -> list[dict]:
-        if "price per sqft" in query:
-            return self.COMPARABLES["results"]
-        if "rental yield" in query:
-            return self.RENTALS["results"]
-        raise AssertionError(f"unexpected query {query!r}")
-
-    def test_market_position_measured_against_comparables(self):
-        with mock.patch.object(analysis, "tavily_search", self._search):
-            out = analysis.analyze_financials(
-                location="Whitefield, Bangalore", price_per_sqft=10_800
+    def test_maps_the_tool_answer_onto_the_published_shape(self):
+        seen, fake = _capture(self.ANSWER)
+        with mock.patch.object(analysis, "research", fake):
+            out = analysis.build_property_profile(
+                property_url=None,
+                address="Prestige Lakeside Habitat, Whitefield, Bangalore",
+                asking_price_inr=14_000_000,
+                area_sqft=1650,
             )
-        # median([8000, 10000, 9000]) = 9000; 10800 is 20% above it.
-        self.assertEqual(out["premium_percent"], 20.0)
+        self.assertEqual(seen["tool"]["name"], "record_property_profile")
+        self.assertEqual(out["builder"], "Prestige")
+        self.assertEqual(out["location"], "Whitefield, Bangalore")
+        # Derived locally: 14,000,000 / 1650. Arithmetic is not a judgment call.
+        self.assertEqual(out["price_per_sqft"], 8484.85)
+        # Stable for the same input, which a model cannot guarantee.
+        self.assertTrue(out["property_id"].startswith("prop_"))
+
+    def test_property_id_is_stable_across_calls(self):
+        _, fake = _capture(self.ANSWER)
+        with mock.patch.object(analysis, "research", fake):
+            first = analysis.build_property_profile(
+                property_url=None, address="12 MG Road, Pune", asking_price_inr=None, area_sqft=None
+            )
+            second = analysis.build_property_profile(
+                property_url=None, address="12 MG Road, Pune", asking_price_inr=None, area_sqft=None
+            )
+        self.assertEqual(first["property_id"], second["property_id"])
+
+    def test_a_residential_address_containing_shop_is_accepted(self):
+        """"Bishop" contains "shop"; both are real Indian residential roads."""
+        seen, fake = _capture(self.ANSWER)
+        with mock.patch.object(analysis, "research", fake):
+            analysis.build_property_profile(
+                property_url=None,
+                address="45 Bishop Cotton Road, Bangalore",
+                asking_price_inr=9_000_000,
+                area_sqft=1200,
+            )
+        self.assertIn("Bishop Cotton Road", seen["prompt"])
+
+    def test_a_genuine_commercial_listing_is_refused_before_billing(self):
+        called = False
+
+        def _fake(**_kwargs):
+            nonlocal called
+            called = True
+            return {}
+
+        with mock.patch.object(analysis, "research", _fake), self.assertRaises(ValueError) as ctx:
+            analysis.build_property_profile(
+                property_url=None,
+                address="Office Space, Commercial Tower, Gurgaon",
+                asking_price_inr=None,
+                area_sqft=None,
+            )
+        self.assertIn("residential", str(ctx.exception))
+        self.assertFalse(called, "a caller's mistake must not reach a paid call")
+
+    def test_a_negative_price_is_refused_before_billing(self):
+        called = False
+
+        def _fake(**_kwargs):
+            nonlocal called
+            called = True
+            return {}
+
+        with mock.patch.object(analysis, "research", _fake), self.assertRaises(ValueError):
+            analysis.build_property_profile(
+                property_url=None,
+                address="12 MG Road, Pune",
+                asking_price_inr=-100,
+                area_sqft=1000,
+            )
+        self.assertFalse(called)
+
+
+class TestOtherCapabilities(unittest.TestCase):
+    def test_financial_analysis_passes_the_resolved_rate_and_maps_back(self):
+        seen, fake = _capture({
+            "market_value": "Overvalued",
+            "premium_percent": 20.0,
+            "estimated_rental_yield_percent": 3.5,
+            "estimated_roi_percent": 7.5,
+            "financial_score": 4.0,
+        })
+        with mock.patch.object(analysis, "research", fake):
+            out = analysis.analyze_financials(
+                location="Whitefield, Bangalore", asking_price_inr=14_000_000, area_sqft=1650
+            )
+        self.assertEqual(seen["tool"]["name"], "record_financial_analysis")
+        self.assertIn("8484.85", seen["prompt"])
         self.assertEqual(out["market_value"], "Overvalued")
-        self.assertEqual(out["estimated_rental_yield_percent"], 3.5)
-        # 3.5 yield + 8.0 appreciation - 20% premium * 0.2 = 7.5
-        self.assertEqual(out["estimated_roi_percent"], 7.5)
-        # Pins the argument order of _score_financials(premium, yield, roi):
-        # feeding those three in any other order lands on a different number.
-        self.assertEqual(out["financial_score"], 2.0)
+        self.assertEqual(out["financial_score"], 4.0)
 
-    def test_no_comparables_reports_unknown_not_fair(self):
-        """Search returned results, none with an extractable price.
-
-        This used to fall back to the property's own price, forcing
-        premium_percent to 0.0 and market_value to "Fair" at *any* asking
-        price -- a fabricated verdict indistinguishable from a real one.
-        """
-
-        def _search(query: str, **_: object) -> list[dict]:
-            if "price per sqft" in query:
-                return [_hit("Outlook", "Prices have risen steadily in this locality.")]
-            return self.RENTALS["results"]
-
-        with mock.patch.object(analysis, "tavily_search", _search):
-            out = analysis.analyze_financials(
-                location="Whitefield, Bangalore", price_per_sqft=10_800
-            )
+    def test_financial_analysis_says_no_price_was_supplied(self):
+        seen, fake = _capture({
+            "market_value": None,
+            "premium_percent": None,
+            "estimated_rental_yield_percent": 3.0,
+            "estimated_roi_percent": 11.0,
+            "financial_score": 5.0,
+        })
+        with mock.patch.object(analysis, "research", fake):
+            out = analysis.analyze_financials(location="Whitefield, Bangalore")
+        self.assertIn("no asking price supplied", seen["prompt"])
         self.assertIsNone(out["market_value"])
-        self.assertIsNone(out["premium_percent"])
-        # Yield and ROI still stand on the location alone.
-        self.assertEqual(out["estimated_rental_yield_percent"], 3.5)
-        self.assertEqual(out["estimated_roi_percent"], 11.5)
-        self.assertEqual(out["financial_score"], 5.4)
 
-    def test_cheaper_property_scores_higher_through_the_whole_function(self):
-        with mock.patch.object(analysis, "tavily_search", self._search):
-            cheap = analysis.analyze_financials(
-                location="Whitefield, Bangalore", price_per_sqft=7_000
-            )
-            dear = analysis.analyze_financials(
-                location="Whitefield, Bangalore", price_per_sqft=13_000
-            )
-        self.assertEqual(cheap["market_value"], "Undervalued")
-        self.assertEqual(dear["market_value"], "Overvalued")
-        self.assertGreater(cheap["financial_score"], dear["financial_score"])
+    def test_location_requires_a_location(self):
+        with self.assertRaises(ValueError):
+            analysis.analyze_location(location="   ")
 
-
-class TestLocationComposition(unittest.TestCase):
-    def _search(self, query: str, **_: object) -> list[dict]:
-        if "infrastructure" in query:
-            return [_hit("Transit", "New Metro Line Phase 2 announced")]
-        if "connectivity" in query:
-            return [_hit("Neighbourhood", "Metro station, schools and hospitals nearby")]
-        raise AssertionError(f"unexpected query {query!r}")
-
-    def test_location_score_averages_connectivity_and_amenities(self):
-        with (
-            mock.patch.object(analysis, "tavily_search", self._search),
-            mock.patch.object(analysis, "geocode", lambda *a, **k: None),
-        ):
+    def test_location_maps_the_answer(self):
+        seen, fake = _capture({
+            "connectivity_score": 7.0,
+            "amenities_score": 8.0,
+            "growth_potential": "High",
+            "planned_infrastructure": ["Metro Phase 2"],
+            "location_score": 8.5,
+            "coordinates": {"latitude": 12.97, "longitude": 77.75},
+        })
+        with mock.patch.object(analysis, "research", fake):
             out = analysis.analyze_location(location="Whitefield, Bangalore")
-        self.assertEqual(out["connectivity_score"], 6.0)  # metro
-        self.assertEqual(out["amenities_score"], 7.0)  # school, hospital
-        self.assertEqual(out["growth_potential"], "High")  # metro keyword
-        # (6.0 + 7.0) / 2 + 1.0 High-growth bonus. Averaging is load-bearing:
-        # summing or multiplying instead lands somewhere else.
-        self.assertEqual(out["location_score"], 7.5)
+        self.assertEqual(seen["tool"]["name"], "record_location_analysis")
+        self.assertEqual(out["location_score"], 8.5)
+        self.assertEqual(out["planned_infrastructure"], ["Metro Phase 2"])
 
-    def test_geocode_miss_leaves_coordinates_null_without_failing(self):
-        with (
-            mock.patch.object(analysis, "tavily_search", self._search),
-            mock.patch.object(analysis, "geocode", lambda *a, **k: None),
-        ):
-            out = analysis.analyze_location(location="Nowhere, Nowhere")
-        self.assertIsNone(out["coordinates"])
-        self.assertEqual(out["location_score"], 7.5)
+    def test_risk_requires_a_location(self):
+        with self.assertRaises(ValueError):
+            analysis.assess_risk(location="")
 
-
-class TestRiskComposition(unittest.TestCase):
-    def _search(self, query: str, **_: object) -> list[dict]:
-        if "complaints litigation" in query:
-            return [_hit("Coverage", "Project delay and litigation reported")]
-        if "builder track record" in query:
-            # Run even with no builder to name, so a missing key still
-            # fails `unavailable` instead of reporting a false "Low".
-            return []
-        if "flooding" in query:
-            return [_hit("Civic", "Occasional flooding reported near the lake")]
-        if "slowdown" in query:
-            return [_hit("Market", "Market slowdown and oversupply of inventory")]
-        raise AssertionError(f"unexpected query {query!r}")
-
-    def test_overall_risk_reflects_all_three_signals(self):
-        with mock.patch.object(analysis, "tavily_search", self._search):
-            out = analysis.assess_risk(
-                builder="Prestige", location="Whitefield, Bangalore", property_type="Apartment"
-            )
-        self.assertEqual(out["builder_legal_risk"], "Medium")  # delay + litigation
-        self.assertEqual(out["environmental_risk"], "Medium")  # one flood signal
-        self.assertEqual(out["market_risk"], "High")  # slowdown + oversupply
-        # Dropping any one of the three from the combine changes this.
+    def test_risk_maps_the_answer_and_names_the_builder(self):
+        seen, fake = _capture({
+            "builder_legal_risk": "Medium",
+            "environmental_risk": "Medium",
+            "market_risk": "High",
+            "overall_risk": "High",
+            "identified_risks": ["one delayed project"],
+        })
+        with mock.patch.object(analysis, "research", fake):
+            out = analysis.assess_risk(builder="Prestige", location="Whitefield, Bangalore")
+        self.assertEqual(seen["tool"]["name"], "record_risk_assessment")
+        self.assertIn("Prestige", seen["prompt"])
         self.assertEqual(out["overall_risk"], "High")
 
-    def test_missing_builder_is_a_stated_limitation_not_a_pass(self):
-        with mock.patch.object(analysis, "tavily_search", self._search):
-            out = analysis.assess_risk(location="Whitefield, Bangalore")
-        self.assertEqual(out["builder_legal_risk"], "Medium")
-        self.assertTrue(
-            any("builder could not be identified" in r for r in out["identified_risks"])
-        )
-
-
-# ---------------------------------------------------------------------------
-# Evidence merge -- what actually reaches the model.
-# ---------------------------------------------------------------------------
+    def test_every_tool_bounds_its_scores_the_way_the_manifest_does(self):
+        for tool in (analysis.FINANCIAL_TOOL, analysis.LOCATION_TOOL):
+            for name, spec in tool["input_schema"]["properties"].items():
+                if name.endswith("_score"):
+                    self.assertEqual((spec["minimum"], spec["maximum"]), (0, 10), name)
 
 
 class TestRecommendEvidence(unittest.TestCase):
-    def _capture(self, answer: dict | None = None):
-        """Replaces groq_tool_call, recording what it was asked."""
-        sent = {}
-
-        def _fake(prompt: str, *, tool: dict, system: str, timeout: float) -> dict:
-            sent["evidence"] = json.loads(prompt)["evidence"]
-            sent["tool"] = tool
-            sent["system"] = system
-            sent["timeout"] = timeout
-            return answer or {
-                "recommendation": "BUY",
-                "confidence_percent": 72,
-                "key_strengths": ["metro nearby"],
-                "key_concerns": ["flood history"],
-            }
-
-        return sent, _fake
+    ANSWER: ClassVar[dict] = {
+        "recommendation": "BUY",
+        "confidence_percent": 72,
+        "key_strengths": ["metro nearby"],
+        "key_concerns": ["flood history"],
+    }
 
     def test_nested_scores_are_lifted_out_of_raw_outputs(self):
-        sent, fake = self._capture()
-        with mock.patch.object(recommendation, "groq_tool_call", fake):
+        seen, fake = _capture(self.ANSWER)
+        with mock.patch.object(recommendation, "research", fake):
             recommendation.recommend(
                 financial_analysis={"financial_score": 7.5, "market_value": "Fair"},
                 location_infrastructure_analysis={"location_score": 6.0},
                 risk_assessment={"overall_risk": "Low"},
             )
-        # Looking these up under the wrong key would silently drop them.
-        self.assertEqual(sent["evidence"]["financial_score"], 7.5)
-        self.assertEqual(sent["evidence"]["location_score"], 6.0)
-        self.assertEqual(sent["evidence"]["overall_risk"], "Low")
-        self.assertEqual(sent["evidence"]["financial_analysis"]["market_value"], "Fair")
+        evidence = json.loads(seen["prompt"])["evidence"]
+        self.assertEqual(evidence["financial_score"], 7.5)
+        self.assertEqual(evidence["location_score"], 6.0)
+        self.assertEqual(evidence["overall_risk"], "Low")
 
     def test_explicit_shortcut_beats_the_nested_value(self):
-        sent, fake = self._capture()
-        with mock.patch.object(recommendation, "groq_tool_call", fake):
+        seen, fake = _capture(self.ANSWER)
+        with mock.patch.object(recommendation, "research", fake):
             recommendation.recommend(
                 financial_analysis={"financial_score": 7.5}, financial_score=9.0
             )
-        self.assertEqual(sent["evidence"]["financial_score"], 9.0)
+        self.assertEqual(json.loads(seen["prompt"])["evidence"]["financial_score"], 9.0)
 
     def test_the_forced_tool_is_the_published_schema(self):
-        sent, fake = self._capture()
-        with mock.patch.object(recommendation, "groq_tool_call", fake):
+        seen, fake = _capture(self.ANSWER)
+        with mock.patch.object(recommendation, "research", fake):
             out = recommendation.recommend(financial_score=7.5)
-        self.assertIs(sent["tool"], RECOMMENDATION_TOOL)
-        self.assertIn(RECOMMENDATION_TOOL_NAME, sent["system"])
+        self.assertIs(seen["tool"], RECOMMENDATION_TOOL)
+        self.assertIn(RECOMMENDATION_TOOL_NAME, seen["system"])
         self.assertEqual(out["recommendation"], "BUY")
-        self.assertEqual(out["confidence_percent"], 72)
 
     def test_no_evidence_at_all_is_rejected_before_any_call(self):
         called = False
 
-        def _fake(*a: object, **k: object) -> dict:
+        def _fake(**_kwargs):
             nonlocal called
             called = True
             return {}
 
-        with (
-            mock.patch.object(recommendation, "groq_tool_call", _fake),
-            self.assertRaises(ValueError),
-        ):
+        with mock.patch.object(recommendation, "research", _fake), self.assertRaises(ValueError):
             recommendation.recommend()
         self.assertFalse(called)
 
 
 # ---------------------------------------------------------------------------
-# Envelope and accounting, over the real client code with a fake transport.
+# clients.research, against a fake SDK client. No network, no key.
 # ---------------------------------------------------------------------------
 
 
-class TestEnvelopeAndSpend(unittest.TestCase):
+class _Usage:
+    def __init__(self, i: int = 100, o: int = 20) -> None:
+        self.input_tokens = i
+        self.output_tokens = o
+
+
+class _ToolUse:
+    type: ClassVar[str] = "tool_use"
+
+    def __init__(self, name: str, payload) -> None:
+        self.name = name
+        self.input = payload
+
+
+class _ServerToolUse:
+    type: ClassVar[str] = "server_tool_use"
+    name: ClassVar[str] = "web_search"
+    input: ClassVar[dict] = {"query": "whatever"}
+
+
+class _Response:
+    def __init__(self, content, *, stop_reason="end_turn", usage=None) -> None:
+        self.content = content
+        self.stop_reason = stop_reason
+        self.usage = usage or _Usage()
+
+
+class _FakeMessages:
+    def __init__(self, responses) -> None:
+        self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        result = self._responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class _FakeClient:
+    def __init__(self, responses) -> None:
+        self.messages = _FakeMessages(responses)
+
+
+TOOL = {"name": "record_it", "description": "d", "input_schema": {"type": "object"}}
+
+
+def _run(responses, **kwargs):
+    fake = _FakeClient(responses)
+    with (
+        mock.patch.dict("os.environ", FAKE_KEY, clear=False),
+        mock.patch.object(clients, "_client", lambda timeout: fake),
+    ):
+        return clients.research(system="s", prompt="p", tool=TOOL, **kwargs), fake
+
+
+class TestResearchClient(unittest.TestCase):
     def setUp(self) -> None:
         clients.reset_spend()
 
-    def test_financial_analysis_reports_two_searches_of_spend(self):
-        transport = _Transport(
-            [
-                (
-                    "price per sqft",
-                    _results(_hit("Rates", "Average Rs. 9,000 / sqft in the area")),
-                ),
-                ("rental yield", _results(_hit("Rent", "Area averages 3.5% rental yield"))),
-            ]
-        )
-        envelope = _dispatch(
-            "financial_analysis",
-            {"location": "Whitefield, Bangalore", "price_per_sqft": 10_800},
-            transport,
-        )
-        self.assertTrue(envelope["ok"], envelope)
-        self.assertEqual(envelope["output"]["market_value"], "Overvalued")
-        self.assertEqual(len(transport.calls), 2)
-        # Search spends Tavily credits, not tokens, and calls no model: the
-        # envelope reports zeros and a null model rather than inventing a
-        # number. Search count is asserted above, where it is observable.
-        self.assertEqual(envelope["usage"], {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "model": None,
-        })
+    def test_returns_the_tool_arguments_and_offers_web_search(self):
+        out, fake = _run([_Response([_ToolUse("record_it", {"answer": 1})])])
+        self.assertEqual(out, {"answer": 1})
+        tools = fake.messages.calls[0]["tools"]
+        self.assertEqual(tools[0]["type"], "web_search_20260209")
+        self.assertEqual(tools[1], TOOL)
 
-    def test_location_bills_searches_but_not_geocoding(self):
-        transport = _Transport(
-            [
-                ("nominatim", [{"lat": "12.9698", "lon": "77.7500"}]),
-                ("infrastructure", _results(_hit("Transit", "New Metro Line announced"))),
-                (
-                    "connectivity",
-                    _results(_hit("Area", "Metro station, schools and hospitals nearby")),
-                ),
-            ]
-        )
-        envelope = _dispatch(
-            "location_infrastructure_analysis", {"location": "Whitefield, Bangalore"}, transport
-        )
-        self.assertTrue(envelope["ok"], envelope)
-        self.assertEqual(envelope["output"]["coordinates"], {"latitude": 12.9698, "longitude": 77.75})
-        self.assertEqual(len(transport.calls), 3)  # geocode + 2 searches
-        self.assertIsNone(envelope["usage"]["model"])
+    def test_usage_records_tokens_and_the_model_never_money(self):
+        _run([_Response([_ToolUse("record_it", {"a": 1})], usage=_Usage(500, 60))])
+        usage = clients.spent_usage()
+        self.assertEqual(usage["input_tokens"], 500)
+        self.assertEqual(usage["output_tokens"], 60)
+        self.assertEqual(usage["model"], clients.MODEL)
+        self.assertNotIn("cost_micros", usage)
 
-    def test_risk_assessment_bills_three_searches(self):
-        transport = _Transport(
-            [
-                ("complaints litigation", _results(_hit("News", "delay reported"))),
-                ("flooding", _results(_hit("Civic", "flooding near the lake"))),
-                ("slowdown", _results(_hit("Market", "slowdown and oversupply"))),
-            ]
-        )
-        envelope = _dispatch(
-            "risk_assessment",
-            {"builder": "Prestige", "location": "Whitefield, Bangalore"},
-            transport,
-        )
-        self.assertTrue(envelope["ok"], envelope)
-        self.assertEqual(len(transport.calls), 3)
-        self.assertIsNone(envelope["usage"]["model"])
+    def test_a_search_block_is_not_mistaken_for_the_answer(self):
+        """A server_tool_use block carries a query, not a result."""
+        out, _ = _run([
+            _Response([_ServerToolUse(), _ToolUse("record_it", {"answer": 2})]),
+        ])
+        self.assertEqual(out, {"answer": 2})
 
-    def test_a_residential_address_containing_shop_is_accepted(self):
-        """"Bishop" contains "shop"; both are real Indian residential roads."""
-        transport = _Transport([("tavily", _results(_hit("Listing", "3 BHK for sale")))])
-        envelope = _dispatch(
-            "property_intelligence",
-            {
-                "address": "45 Bishop Cotton Road, Bangalore",
-                "asking_price_inr": 9_000_000,
-                "area_sqft": 1_200,
-            },
-            transport,
-        )
-        self.assertTrue(envelope["ok"], envelope)
-        self.assertEqual(envelope["output"]["location"], "45 Bishop Cotton Road, Bangalore")
-        self.assertEqual(envelope["output"]["price_per_sqft"], 7_500.0)
+    def test_a_paused_turn_is_resumed(self):
+        out, fake = _run([
+            _Response([_ServerToolUse()], stop_reason="pause_turn"),
+            _Response([_ToolUse("record_it", {"answer": 3})]),
+        ])
+        self.assertEqual(out, {"answer": 3})
+        self.assertEqual(len(fake.messages.calls), 2)
+        # Both turns are billed, so both must be counted.
+        self.assertEqual(clients.spent_usage()["input_tokens"], 200)
 
-    def test_a_genuine_commercial_listing_is_still_refused(self):
-        transport = _Transport([("tavily", _results())])
-        envelope = _dispatch(
-            "property_intelligence",
-            {"address": "Office Space, Commercial Tower, Gurgaon"},
-            transport,
-        )
-        self.assertFalse(envelope["ok"])
-        self.assertEqual(envelope["error"]["type"], "invalid_request")
-        self.assertIn("residential", envelope["error"]["message"])
+    def test_never_calling_the_tool_is_retryable_unavailable(self):
+        with self.assertRaises(ConnectionError) as ctx:
+            _run([_Response([])])
+        self.assertIn("record_it", str(ctx.exception))
 
-    def test_spend_before_a_failure_is_still_reported(self):
-        """One search succeeded, the next 500'd. The first one was paid for."""
-        transport = _Transport(
-            [
-                (
-                    "price per sqft",
-                    _results(_hit("Rates", "Average Rs. 9,000 / sqft in the area")),
-                ),
-                (
-                    "rental yield",
-                    urllib.error.HTTPError(
-                        "https://api.tavily.com/search", 500, "Server Error", None, None
-                    ),
-                ),
-            ]
-        )
-        envelope = _dispatch(
-            "financial_analysis", {"location": "Whitefield, Bangalore"}, transport
-        )
-        self.assertFalse(envelope["ok"])
-        self.assertEqual(envelope["error"]["type"], "unavailable")
-        self.assertTrue(envelope["error"]["retryable"])
-        self.assertIsNone(envelope["usage"]["model"])
+    def test_tokens_are_recorded_even_when_no_answer_arrives(self):
+        with self.assertRaises(ConnectionError):
+            _run([_Response([], usage=_Usage(400, 10))])
+        self.assertEqual(clients.spent_usage()["input_tokens"], 400)
 
-    def test_recommendation_forces_the_tool_and_reports_tokens(self):
-        transport = _Transport(
-            [
-                (
-                    "groq",
-                    _groq_payload(
-                        {
-                            "recommendation": "NEGOTIATE",
-                            "confidence_percent": 64,
-                            "key_strengths": ["good yield"],
-                            "key_concerns": ["no location evidence"],
-                            "recommended_offer_price_inr": 8_500_000,
-                        }
-                    ),
-                )
-            ]
-        )
-        envelope = _dispatch(
-            "investment_recommendation",
-            {"financial_score": 7.5, "asking_price_inr": 9_000_000},
-            transport,
-        )
-        self.assertTrue(envelope["ok"], envelope)
-        self.assertEqual(envelope["output"]["recommendation"], "NEGOTIATE")
-        self.assertEqual(envelope["output"]["recommended_offer_price_inr"], 8_500_000)
-        self.assertEqual(envelope["usage"], {
-            "input_tokens": 259,
-            "output_tokens": 88,
-            "model": "llama-3.3-70b-versatile",
-        })
+    def test_a_missing_key_is_unavailable_not_a_crash(self):
+        with mock.patch.dict("os.environ", {}, clear=True), self.assertRaises(RuntimeError) as ctx:
+            clients.research(system="s", prompt="p", tool=TOOL)
+        self.assertIn("ANTHROPIC_API_KEY is not configured", str(ctx.exception))
 
-    def test_tavily_request_authenticates_by_header_not_body(self):
-        """Tavily documents Bearer auth; the key must never be in the payload."""
-        seen = {}
 
-        class _Recording(_Transport):
-            def __call__(self, request, timeout=None):
-                seen["auth"] = request.headers.get("Authorization")
-                seen["body"] = json.loads(request.data.decode("utf-8"))
-                return super().__call__(request, timeout)
+class TestEnvelopeWithoutCredentials(unittest.TestCase):
+    """Every capability degrades to `unavailable` rather than crashing."""
 
-        _dispatch(
-            "location_infrastructure_analysis",
-            {"location": "Whitefield, Bangalore"},
-            _Recording([
-                ("nominatim", []),
-                ("infrastructure", _results(_hit("T", "Metro announced"))),
-                ("connectivity", _results(_hit("A", "schools nearby"))),
-            ]),
-        )
-        self.assertEqual(seen["auth"], f"Bearer {FAKE_KEYS['TAVILY_API_KEY']}")
-        self.assertNotIn("api_key", seen["body"])
-        self.assertIn("query", seen["body"])
+    def setUp(self) -> None:
+        clients.reset_spend()
 
-    def test_groq_request_carries_the_forced_tool_choice(self):
-        sent = {}
-        payload = _groq_payload(
-            {
-                "recommendation": "BUY",
-                "confidence_percent": 80,
-                "key_strengths": [],
-                "key_concerns": [],
-            }
-        )
-
-        class _Recording(_Transport):
-            def __call__(self, request, timeout=None):
-                sent.update(json.loads(request.data.decode("utf-8")))
-                return super().__call__(request, timeout)
-
-        _dispatch(
-            "investment_recommendation",
-            {"financial_score": 7.5},
-            _Recording([("groq", payload)]),
-        )
-        self.assertEqual(
-            sent["tool_choice"],
-            {"type": "function", "function": {"name": RECOMMENDATION_TOOL_NAME}},
-        )
-        self.assertEqual(sent["tools"], [RECOMMENDATION_TOOL])
-        self.assertNotIn("response_format", sent)
-
-    def test_tokens_are_reported_even_when_the_answer_is_rejected(self):
-        """The model called the tool but omitted `recommendation`.
-
-        The call is billed whether or not its arguments are usable, so the
-        envelope has to carry those tokens rather than zeroing them.
-        """
-        transport = _Transport([("groq", _groq_payload({"confidence_percent": 70}))])
-        envelope = _dispatch(
-            "investment_recommendation", {"financial_score": 7.5}, transport
-        )
-        self.assertFalse(envelope["ok"])
-        self.assertEqual(envelope["error"]["type"], "unavailable")
-        self.assertTrue(envelope["error"]["retryable"])
-        self.assertEqual(envelope["usage"]["input_tokens"], 259)
-        self.assertEqual(envelope["usage"]["model"], "llama-3.3-70b-versatile")
-
-    def test_a_different_tool_name_is_refused(self):
-        transport = _Transport(
-            [(
-                "groq",
-                _groq_payload(
-                    {"recommendation": "BUY", "confidence_percent": 80},
-                    name="something_else",
-                ),
-            )]
-        )
-        envelope = _dispatch(
-            "investment_recommendation", {"financial_score": 7.5}, transport
-        )
-        self.assertFalse(envelope["ok"])
-        self.assertIn("something_else", envelope["error"]["message"])
-
-    def test_describe_spends_nothing_and_ignores_a_bad_deadline(self):
+    def _dispatch(self, capability: str, payload: dict) -> dict:
         request = json.dumps(
-            {"protocol": "agentcall/v1", "capability": "describe", "deadline_ms": "soon"}
+            {"protocol": "agentcall/v1", "capability": capability, "input": payload}
         )
-        envelope = agent_main.dispatch(request)
-        self.assertTrue(envelope["ok"], envelope)
+        with mock.patch.dict("os.environ", {}, clear=True):
+            return agent_main.dispatch(request)
+
+    def test_each_capability_reports_unavailable(self):
+        for capability, payload in (
+            ("property_intelligence", {"address": "12 MG Road, Pune"}),
+            ("financial_analysis", {"location": "Whitefield"}),
+            ("location_infrastructure_analysis", {"location": "Whitefield"}),
+            ("risk_assessment", {"location": "Whitefield"}),
+            ("investment_recommendation", {"financial_score": 7.5}),
+        ):
+            with self.subTest(capability=capability):
+                envelope = self._dispatch(capability, payload)
+                self.assertFalse(envelope["ok"])
+                self.assertEqual(envelope["error"]["type"], "unavailable")
+                self.assertIn("ANTHROPIC_API_KEY", envelope["error"]["message"])
+                self.assertEqual(envelope["usage"]["model"], None)
+
+    def test_describe_answers_without_a_key(self):
+        envelope = self._dispatch("describe", {})
+        self.assertTrue(envelope["ok"])
         self.assertEqual(
             envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "model": None}
         )
-
-    def test_a_bad_deadline_still_fails_a_capability_that_uses_it(self):
-        request = json.dumps(
-            {
-                "protocol": "agentcall/v1",
-                "capability": "financial_analysis",
-                "input": {"location": "Whitefield"},
-                "deadline_ms": "soon",
-            }
-        )
-        envelope = agent_main.dispatch(request)
-        self.assertFalse(envelope["ok"])
-        self.assertEqual(envelope["error"]["type"], "invalid_request")
 
 
 class TestToolSchemaGolden(unittest.TestCase):
@@ -589,9 +418,9 @@ class TestToolSchemaGolden(unittest.TestCase):
             "RECOMMENDATION_TOOL changed; review the diff and update the golden file.",
         )
 
-    def test_required_fields_match_what_the_envelope_promises(self):
-        required = RECOMMENDATION_TOOL["function"]["parameters"]["required"]
-        # agent.yaml's output_schema requires these two of the caller.
+    def test_is_in_the_anthropic_tool_shape(self):
+        self.assertEqual(sorted(RECOMMENDATION_TOOL), ["description", "input_schema", "name"])
+        required = RECOMMENDATION_TOOL["input_schema"]["required"]
         self.assertIn("recommendation", required)
         self.assertIn("confidence_percent", required)
 

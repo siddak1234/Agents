@@ -20,7 +20,7 @@ investment-due-diligence/
 ├── README.md
 ├── analysis.py        # capabilities 1-4 (property, financial, location, risk)
 ├── recommendation.py  # capability 5 (LLM synthesis)
-├── clients.py         # Tavily + Groq clients, API keys, timeouts
+├── clients.py         # the Claude client: web search + a forced tool, per call
 ├── budget.py          # deadline_ms → per-call timeout slices
 └── tests/
     ├── test_agent.py         # the envelope, over a real subprocess
@@ -35,11 +35,11 @@ investment-due-diligence/
 | Capability | What it does | Calls out to |
 |---|---|---|
 | `describe` | Reports name + capability list. Free. | nothing |
-| `property_intelligence` | Builds a verified property profile (builder, type, configuration, location, price/sqft). | Tavily (best-effort) |
-| `financial_analysis` | Market position vs. comparables, rental yield, ROI. | Tavily |
-| `location_infrastructure_analysis` | Connectivity, amenities, planned infrastructure, growth outlook. | Tavily |
-| `risk_assessment` | Builder/legal, environmental, and market risk. | Tavily |
-| `investment_recommendation` | Synthesizes the above into a final call with reasoning. | Groq (`llama-3.3-70b-versatile`) |
+| `property_intelligence` | Builds a verified property profile (builder, type, configuration, location, price/sqft). | Claude + web search |
+| `financial_analysis` | Market position vs. comparables, rental yield, ROI. | Claude + web search |
+| `location_infrastructure_analysis` | Connectivity, amenities, planned infrastructure, growth outlook. | Claude + web search |
+| `risk_assessment` | Builder/legal, environmental, and market risk. | Claude + web search |
+| `investment_recommendation` | Synthesizes the above into a final call with reasoning. | Claude |
 
 A typical caller runs `property_intelligence` first, feeds its output
 into `financial_analysis`, `location_infrastructure_analysis`, and
@@ -94,14 +94,16 @@ Set these in `.env` (never commit real keys):
 
 | Variable | Required by | Purpose |
 |---|---|---|
-| `TAVILY_API_KEY` | `financial_analysis`, `location_infrastructure_analysis`, `risk_assessment`; used best-effort by `property_intelligence` | Search for comparables, locality news, builder track record, infrastructure updates |
-| `GROQ_API_KEY` | `investment_recommendation` | LLM reasoning for the final recommendation |
+| `ANTHROPIC_API_KEY` | every capability except `describe` | Claude, with the server-side web search tool, does the research and reports through a per-capability tool schema |
 
-`property_intelligence` degrades gracefully without `TAVILY_API_KEY` —
-it falls back to what the caller supplied instead of failing, since
-search is corroboration, not the property's identity. Every other
-capability that needs a key returns `unavailable` (not a crash) when
-that key is missing.
+Every capability that needs the key returns `unavailable` (not a crash)
+when it is missing, and `describe` answers regardless.
+
+`property_intelligence` used to answer without a key by falling back to
+what the caller had supplied. It no longer does: the profile is
+researched now, so without a key there is nothing honest to return, and
+echoing the caller's own input back as a "verified profile" was the
+failure mode that removal avoids.
 
 ## Design notes
 
@@ -123,38 +125,36 @@ that key is missing.
 
 - **Timeouts are budgeted from `deadline_ms`.** `budget.py` splits the
   remaining wall-clock across the outbound calls a capability still has
-  to make (capped at 12s each), so three Tavily searches cannot schedule
-  45s against a 30s deadline. Omit `deadline_ms` and the agent assumes
+  to make, so a multi-call capability cannot overrun the deadline. Omit `deadline_ms` and the agent assumes
   30s.
-- **Stdlib only.** `clients.py` talks to Tavily and Groq via raw
-  `urllib`, so `command:` in `agent.yaml` stays a bare
-  `["python3", "agent_main.py"]` — nothing to install.
-- **Heuristic extraction, not NLP.** `analysis.py` uses regex and
-  keyword heuristics over Tavily search snippets — deliberately simple,
-  meant to be swapped for something sturdier without touching
-  `agent_main.py`. Two limits are handled explicitly rather than left to
-  chance: hints match on word boundaries (so "shop" does not fire inside
-  "Bishop"), and a risk keyword preceded by a negation does not count (so
-  coverage reading "no oversupply" is not reported as oversupply). Both
-  remain heuristics — "no doubt there is a slowdown" still reads as negated.
-- **Evidence into Groq is size-capped.** `investment_recommendation`
+- **One vendor, via the official SDK.** `clients.py` uses the `anthropic`
+  package; `command:` runs under `uv` so the dependency is pinned by
+  `uv.lock`. This matches `realty-lead-gen` and `operations-maintenance-agent`,
+  and leaves the agent with a single credential.
+- **The model researches; the code validates.** Each capability is one
+  Claude call with web search enabled, reporting through a tool whose schema
+  mirrors that capability's `output_schema`. What stays in code is what is
+  not a judgment call: validating the caller's input, deriving price per
+  square foot, minting a stable `property_id`. This replaced regex and
+  keyword heuristics over search snippets, which read "no oversupply" as
+  oversupply and refused any address containing "Bishop" because it
+  contains "shop".
+- **Evidence into the model is size-capped.** `investment_recommendation`
   rejects caller-supplied evidence objects larger than 8 KiB so the
   prompt cannot grow without bound.
-- **The recommendation comes back through a forced tool call.**
-  `RECOMMENDATION_TOOL` in `recommendation.py` is the tool definition, the
-  forced `tool_choice`, and the shape `_validate_output` checks, so the
-  schema asked of the model cannot drift from the one the envelope
-  publishes; `tests/golden/` pins it. If the model returns no usable
+- **Every answer comes back through a tool schema.** Each capability names
+  a tool whose schema mirrors what the envelope publishes, so the shape is
+  part of what was asked for rather than checked afterwards.
+  `tests/golden/` pins the recommendation tool. If the model returns no usable
   `recommendation` or `confidence_percent`, the capability fails
   `unavailable` (retryable) rather than substituting a default — an
   invented "NEGOTIATE at 50%" is indistinguishable from a real call, and
   this is the one field the agent exists to produce.
-- **`usage` reports what was actually spent.** Tavily bills 1 credit per
-  `search_depth: "basic"` search ($0.008), and Groq bills tokens; both are
-  recorded in `clients.py` as they are spent and read once in
-  `agent_main.py` where the envelope is built. A request that paid for two
-  searches and then failed reports those two searches rather than zero.
-  OpenStreetMap geocoding is free and is not counted.
+- **`usage` reports tokens and the model, never money.** Recorded in
+  `clients.py` as calls happen and read once in `agent_main.py` where the
+  envelope is built, so a request that paid and then failed still reports
+  what it spent. See `docs/AGENT_PROTOCOL.md` for why cost is derived rather
+  than copied into each agent.
 
 ## Tests
 
@@ -165,10 +165,10 @@ python3 -m unittest discover -s tests
 `test_agent.py` runs the real `agent_main.py` as a subprocess, the same
 way the orchestrator does, so stdout hygiene and the exit code are
 checked, not assumed. `test_capabilities.py` covers what the subprocess
-tests cannot reach without a key: it stubs `tavily_search`/`geocode` where
-the assertion is about scoring composition, and replaces
-`urllib.request.urlopen` where it is about the envelope, so the real
-client code, error mapping and spend tally all run.
+tests cannot reach without a key: it stubs `research` where the assertion is
+about a capability's wiring, and injects a fake SDK client where it is about
+`clients` itself — so usage recording, `pause_turn` resumption and the
+error-to-envelope mapping all run for real.
 
 None of them touch the network. The envelope tests do set fake API keys,
 but the transport itself is replaced, so no socket is opened and a real
