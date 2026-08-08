@@ -132,7 +132,11 @@ that key is missing.
 - **Heuristic extraction, not NLP.** `analysis.py` uses regex and
   keyword heuristics over Tavily search snippets — deliberately simple,
   meant to be swapped for something sturdier without touching
-  `agent_main.py`.
+  `agent_main.py`. Two limits are handled explicitly rather than left to
+  chance: hints match on word boundaries (so "shop" does not fire inside
+  "Bishop"), and a risk keyword preceded by a negation does not count (so
+  coverage reading "no oversupply" is not reported as oversupply). Both
+  remain heuristics — "no doubt there is a slowdown" still reads as negated.
 - **Evidence into Groq is size-capped.** `investment_recommendation`
   rejects caller-supplied evidence objects larger than 8 KiB so the
   prompt cannot grow without bound.

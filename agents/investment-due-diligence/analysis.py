@@ -418,9 +418,31 @@ def assess_risk(
     }
 
 
+#: Cues that flip a risk keyword's meaning. Coverage reading "no oversupply"
+#: or "no flooding reported" used to score exactly like coverage reporting
+#: the opposite, and identified_risks then asserted a history the source
+#: denied. Deliberately small: this reads a few words back for a negation,
+#: it is not sentiment analysis, and "no doubt there is a slowdown" will
+#: still be read as negated.
+NEGATION_CUES = ("no", "not", "never", "without", "free of", "free from")
+_NEGATED = re.compile(r"\b(?:" + "|".join(NEGATION_CUES) + r")\b[^.;!?]{0,24}$")
+
+
 def _count_keyword_hits(results: list[dict[str, Any]], keywords: tuple[str, ...]) -> int:
     text = _joined_text(results).lower()
-    return sum(1 for k in keywords if k in text)
+    return sum(1 for k in keywords if _asserted(text, k))
+
+
+def _asserted(text: str, keyword: str) -> bool:
+    """True if `keyword` appears at least once without a negation before it.
+
+    Matching starts on a word boundary but does not end on one, so "waterlog"
+    still catches "waterlogging" while "case" no longer fires on "showcase".
+    """
+    for match in re.finditer(rf"\b{re.escape(keyword)}", text):
+        if not _NEGATED.search(text[max(0, match.start() - 40) : match.start()]):
+            return True
+    return False
 
 
 def _combine_risk_levels(levels: list[str]) -> str:

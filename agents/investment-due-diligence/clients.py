@@ -1,10 +1,14 @@
-"""Tavily search and Groq chat-completions clients.
+"""Tavily search, Groq tool calls, and OpenStreetMap geocoding.
 
 API keys are read here via os.getenv at call time -- nothing else in this
-agent touches os.environ for a credential. Both functions use plain
-urllib (stdlib only, no dependencies). Per-call timeouts are supplied by
-the caller from `DeadlineBudget` so sequential searches share one
+agent touches os.environ for a credential. Every call uses plain urllib
+(stdlib only, no dependencies). Per-call timeouts are supplied by the
+caller from `DeadlineBudget` so sequential searches share one
 `deadline_ms` instead of each taking a fixed 15s.
+
+This module also keeps the request's spend tally: it is the only file that
+spends anything, so cost is recorded here as it is incurred and read once
+by agent_main.py when it builds the envelope. See `_spend` below.
 
 Callers never see urllib or HTTP status codes -- failures come back as
 plain built-in exceptions that agent_main.py already knows how to turn

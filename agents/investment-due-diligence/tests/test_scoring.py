@@ -20,9 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import budget as budget_mod
 from analysis import (
     DEFAULT_RENTAL_YIELD_PERCENT,
+    FLOOD_KEYWORDS,
+    MARKET_SLOWDOWN_KEYWORDS,
+    NEGATIVE_BUILDER_KEYWORDS,
     _classify_growth,
     _classify_market_value,
     _combine_risk_levels,
+    _count_keyword_hits,
     _extract_prices_per_sqft,
     _extract_rental_yield,
     _keyword_score,
@@ -93,6 +97,38 @@ class TestKeywordScore(unittest.TestCase):
     def test_partial_hits(self):
         results = [_hit(content="nearby metro station")]
         self.assertEqual(_keyword_score(results, ("metro", "airport", "railway")), 6.0)
+
+
+class TestCountKeywordHits(unittest.TestCase):
+    """Risk keywords must be asserted by the source, not merely present."""
+
+    def test_counts_a_plainly_stated_signal(self):
+        self.assertEqual(
+            _count_keyword_hits([_hit("", "Market slowdown and oversupply of inventory")],
+                                MARKET_SLOWDOWN_KEYWORDS), 2)
+        self.assertEqual(
+            _count_keyword_hits([_hit("", "Occasional flooding near the lake")],
+                                FLOOD_KEYWORDS), 1)
+
+    def test_a_negated_signal_is_not_a_signal(self):
+        # Reported "locality has reported flooding" for coverage saying the
+        # opposite, because the keyword was merely present in the text.
+        for text in ("Steady absorption, no oversupply reported",
+                     "No slowdown in this market"):
+            self.assertEqual(
+                _count_keyword_hits([_hit("", text)], MARKET_SLOWDOWN_KEYWORDS), 0, text)
+        self.assertEqual(
+            _count_keyword_hits([_hit("", "No flooding history in this locality")],
+                                FLOOD_KEYWORDS), 0)
+
+    def test_partial_words_still_match_but_not_across_a_word_start(self):
+        # "waterlog" must still catch "waterlogging" ...
+        self.assertEqual(
+            _count_keyword_hits([_hit("", "Waterlogging during monsoon")], FLOOD_KEYWORDS), 2)
+        # ... while "case" must not fire on "showcase".
+        self.assertEqual(
+            _count_keyword_hits([_hit("", "Builder showcase event")],
+                                NEGATIVE_BUILDER_KEYWORDS), 0)
 
 
 class TestClassifyGrowth(unittest.TestCase):
