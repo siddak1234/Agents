@@ -88,12 +88,29 @@ def _handle_extract_clauses(payload: dict[str, Any]) -> dict[str, Any]:
         return fail(capability, "invalid_request", "'lease_pages' must be a non-empty array of strings")
     if not all(isinstance(p, str) for p in lease_pages):
         return fail(capability, "invalid_request", "every item in 'lease_pages' must be a string")
+    if len(lease_pages) > lease_logic.MAX_LEASE_PAGES:
+        return fail(
+            capability,
+            "invalid_request",
+            f"'lease_pages' has {len(lease_pages)} pages, over the "
+            f"{lease_logic.MAX_LEASE_PAGES}-page limit — each chunk of pages is one "
+            "billed model call, so split the document and call again per part",
+        )
 
     try:
         clauses, usage = lease_logic.extract_clauses(lease_pages)
     except lease_logic.LeaseLogicError as exc:
         etype, retryable = _EXTRACT_ERROR_MAP.get(type(exc), ("internal", False))
-        return fail(capability, etype, str(exc), retryable=retryable, usage=getattr(exc, "usage", None))
+        # ModelCallError decides its own retryability: a rejected key and a
+        # dropped connection are both `unavailable`, but only one is worth
+        # trying again. See docs/INTERN_BRIEF.md's error table.
+        return fail(
+            capability,
+            etype,
+            str(exc),
+            retryable=getattr(exc, "retryable", retryable),
+            usage=getattr(exc, "usage", None),
+        )
 
     return ok(capability, {"clauses": clauses}, usage=usage)
 
@@ -119,12 +136,13 @@ def _handle_calculate_deadline(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 # Maps a raised exception type to (error.type, retryable). A missing
-# credential or dependency won't fix itself on retry; a model-call failure
-# (network blip, transient API error) might.
+# credential or dependency won't fix itself on retry. A model-call failure
+# might or might not, so ModelCallError carries its own answer and the
+# `False` here is only the fallback.
 _EXTRACT_ERROR_MAP: dict[type, tuple[str, bool]] = {
     lease_logic.MissingCredentialError: ("unavailable", False),
     lease_logic.MissingDependencyError: ("unavailable", False),
-    lease_logic.ModelCallError: ("unavailable", True),
+    lease_logic.ModelCallError: ("unavailable", False),
 }
 
 _CAPABILITY_HANDLERS = {
@@ -134,7 +152,7 @@ _CAPABILITY_HANDLERS = {
 }
 
 
-def ok(capability: str, output: dict[str, Any], *, usage: dict[str, int] | None = None) -> dict[str, Any]:
+def ok(capability: str, output: dict[str, Any], *, usage: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL, "ok": True, "capability": capability,
         "output": output, "usage": usage or zero_usage(), "error": None,
@@ -147,7 +165,7 @@ def fail(
     message: str,
     *,
     retryable: bool = False,
-    usage: dict[str, int] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL, "ok": False, "capability": capability,
@@ -156,8 +174,10 @@ def fail(
     }
 
 
-def zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+def zero_usage() -> dict[str, Any]:
+    # Always report usage, zeroed when nothing was spent. `model` is null when
+    # no model was called — tokens and a model name, never money.
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 if __name__ == "__main__":

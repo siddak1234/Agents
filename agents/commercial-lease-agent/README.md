@@ -44,35 +44,54 @@ echo '{"protocol": "agentcall/v1", "capability": "extract_clauses", "input": {"l
 | `ANTHROPIC_API_KEY` | `extract_clauses` | none — required |
 | `LEASE_AGENT_MODEL` | `extract_clauses` | `claude-sonnet-5` |
 | `LEASE_AGENT_CHUNK_SIZE` | `extract_clauses` | `20` pages per model call |
-| `LEASE_AGENT_INPUT_PRICE_PER_MTOK` | `extract_clauses` cost estimate | published Sonnet 5 rate |
-| `LEASE_AGENT_OUTPUT_PRICE_PER_MTOK` | `extract_clauses` cost estimate | published Sonnet 5 rate |
 
 Long leases are processed in chunks of `LEASE_AGENT_CHUNK_SIZE` pages per
 model call, so a 250-page lease results in ~13 calls, merged into one
-clause list — not one call for the whole document.
+clause list — not one call for the whole document. Because each chunk is one
+billed call, `lease_pages` is capped at **1000 pages**; a longer document is
+refused with `invalid_request` rather than silently costing more, and the
+caller splits it.
+
+## Quotes are checked, not trusted
+
+Every clause returned has had its `text_quote` found in the pages you passed
+in, ignoring differences in line wrapping. A clause whose quote appears on no
+page is **dropped**, and the count is noted on stderr — it is not returned
+with the model's guessed `page_number`.
+
+That matters because a citation you cannot check is worse than no citation:
+the point of this capability is a quote and a page a human can go and verify.
+If the model returns nothing but unverifiable clauses for a chunk, that is
+reported as `unavailable`, not as an empty success.
 
 ## Example output
 
 `calculate_deadline`, success:
 ```json
-{"protocol": "agentcall/v1", "ok": true, "capability": "calculate_deadline", "output": {"deadline_date": "2028-10-02"}, "usage": {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}, "error": null}
+{"protocol": "agentcall/v1", "ok": true, "capability": "calculate_deadline", "output": {"deadline_date": "2028-10-02"}, "usage": {"input_tokens": 0, "output_tokens": 0, "model": null}, "error": null}
 ```
 
 `extract_clauses`, success:
 ```json
-{"protocol": "agentcall/v1", "ok": true, "capability": "extract_clauses", "output": {"clauses": [{"clause_type": "renewal", "text_quote": "This Lease shall renew automatically for successive one-year terms unless either party provides 90 days written notice of non-renewal.", "page_number": 1, "confidence_score": 0.95}]}, "usage": {"input_tokens": 412, "output_tokens": 96, "cost_micros": 1784}, "error": null}
+{"protocol": "agentcall/v1", "ok": true, "capability": "extract_clauses", "output": {"clauses": [{"clause_type": "renewal", "text_quote": "This Lease shall renew automatically for successive one-year terms unless either party provides 90 days written notice of non-renewal.", "page_number": 1, "confidence_score": 0.95}]}, "usage": {"input_tokens": 412, "output_tokens": 96, "model": "claude-sonnet-5"}, "error": null}
 ```
 
 `extract_clauses`, missing credential:
 ```json
-{"protocol": "agentcall/v1", "ok": false, "capability": "extract_clauses", "output": null, "usage": {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}, "error": {"type": "unavailable", "message": "ANTHROPIC_API_KEY is not set", "retryable": false}}
+{"protocol": "agentcall/v1", "ok": false, "capability": "extract_clauses", "output": null, "usage": {"input_tokens": 0, "output_tokens": 0, "model": null}, "error": {"type": "unavailable", "message": "ANTHROPIC_API_KEY is not set", "retryable": false}}
 ```
 
 ## Errors
 
-| Situation | `error.type` |
-|---|---|
-| Missing or malformed `lease_pages`, `lease_end_date`, or `notice_period_days` | `invalid_request` |
-| `ANTHROPIC_API_KEY` not set | `unavailable` |
-| The model call itself fails (network, API error) | `unavailable`, `retryable: true` |
-| Anything unanticipated | `internal` |
+| Situation | `error.type` | `retryable` |
+|---|---|---|
+| Missing or malformed `lease_pages`, `lease_end_date`, or `notice_period_days` | `invalid_request` | `false` |
+| `lease_pages` longer than 1000 | `invalid_request` | `false` |
+| `notice_period_days` out of range — usually a unit mix-up, seconds for days | `invalid_request` | `false` |
+| `ANTHROPIC_API_KEY` not set, or rejected by the API | `unavailable` | `false` — configuration does not fix itself |
+| Rate limited, connection dropped, or a 5xx from the API | `unavailable` | `true` |
+| The model returned nothing usable for a chunk | `unavailable` | `false` |
+| Anything unanticipated | `internal` | `false` |
+
+`retryable` is read off the table in `docs/INTERN_BRIEF.md`, not judged per
+case: `unavailable` is retryable only when the cause is transient.

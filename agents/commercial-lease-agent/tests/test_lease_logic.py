@@ -6,6 +6,7 @@ real HTTP request, even though a fake API key is set — the real anthropic
 client is never constructed.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -34,12 +35,19 @@ def test_calculate_deadline_rejects_bad_format():
 
 def test_locate_page_finds_exact_quote():
     pages = ["first page text", "the renewal clause is here", "third page"]
-    assert lease_logic._locate_page("renewal clause", pages, fallback=1) == 2
+    assert lease_logic._locate_page("renewal clause", pages) == 2
 
 
-def test_locate_page_falls_back_when_quote_not_found():
+def test_locate_page_returns_none_when_quote_is_on_no_page():
     pages = ["first page", "second page"]
-    assert lease_logic._locate_page("not present anywhere", pages, fallback=1) == 1
+    assert lease_logic._locate_page("not present anywhere", pages) is None
+
+
+def test_locate_page_tolerates_pdf_line_wrapping():
+    # Page text out of a PDF wraps where the layout did; a genuinely verbatim
+    # quote still would not match byte-for-byte.
+    pages = ["Tenant shall maintain\nthe Premises in good\ncondition."]
+    assert lease_logic._locate_page("Tenant shall maintain the Premises", pages) == 1
 
 
 def test_clean_clause_recomputes_page_and_clamps_confidence():
@@ -53,6 +61,20 @@ def test_clean_clause_recomputes_page_and_clamps_confidence():
     cleaned = lease_logic._clean_clause(raw, pages)
     assert cleaned["page_number"] == 2
     assert cleaned["confidence_score"] == 1.0
+
+
+def test_clean_clause_drops_a_quote_found_on_no_page():
+    # The promise in agent.yaml is a verbatim quote and the page it came from.
+    # A paraphrase honours neither, and the model's claimed page is not
+    # evidence — so it must not come back looking like a checked citation.
+    pages = ["Tenant shall pay Base Rent of $10.00 per rentable square foot."]
+    raw = {
+        "clause_type": "financial",
+        "text_quote": "Tenant shall pay Base Rent of $10.00 per square footage.",
+        "page_number": 2,
+        "confidence_score": 0.95,
+    }
+    assert lease_logic._clean_clause(raw, pages) is None
 
 
 def test_chunk_ranges_splits_long_document():
@@ -73,12 +95,40 @@ def test_positive_int_falls_back_on_invalid_or_missing():
     assert lease_logic._positive_int("7", 20) == 7
 
 
-def test_estimate_cost_micros_known_model():
-    assert lease_logic._estimate_cost_micros("claude-sonnet-5", 1_000_000, 1_000_000) == 12_000_000
+def test_usage_names_the_model_and_never_money():
+    # docs/AGENT_PROTOCOL.md: usage carries tokens and the model, not a price.
+    # An agent still emitting cost_micros decodes as model: null, silently
+    # claiming it called nothing.
+    usage = lease_logic._usage_dict("claude-sonnet-5", 412, 96)
+    assert usage == {"input_tokens": 412, "output_tokens": 96, "model": "claude-sonnet-5"}
+    assert "cost_micros" not in usage
 
 
-def test_estimate_cost_micros_unknown_model_is_zero_not_fabricated():
-    assert lease_logic._estimate_cost_micros("some-future-model-nobody-priced-yet", 1000, 1000) == 0
+def test_calculate_deadline_rejects_a_unit_mix_up_as_a_caller_error():
+    # 90 days expressed in seconds. Uncaught this is an OverflowError, which
+    # escapes as `internal` and tells the caller nothing actionable.
+    try:
+        lease_logic.calculate_deadline("2026-01-01", 90 * 24 * 60 * 60)
+    except lease_logic.LeaseLogicError as exc:
+        assert "notice_period_days" in str(exc)
+    else:
+        raise AssertionError("expected LeaseLogicError for an out-of-range notice period")
+
+
+def test_is_transient_separates_configuration_from_a_blip():
+    # docs/INTERN_BRIEF.md's error table: `unavailable` is retryable only when
+    # the cause is transient. A rejected key is configuration, and retrying it
+    # just re-spends money on the identical rejection.
+    class _StatusError(Exception):
+        def __init__(self, code):
+            self.status_code = code
+
+    assert lease_logic._is_transient(_StatusError(401)) is False
+    assert lease_logic._is_transient(_StatusError(403)) is False
+    assert lease_logic._is_transient(_StatusError(404)) is False
+    assert lease_logic._is_transient(_StatusError(429)) is True
+    assert lease_logic._is_transient(_StatusError(503)) is True
+    assert lease_logic._is_transient(ConnectionError("dropped")) is True
 
 
 def test_is_well_formed_rejects_invalid_clause_type():
@@ -168,7 +218,8 @@ def test_extract_clauses_success_across_two_chunks(monkeypatch):
     assert clauses[0]["page_number"] == 1
     assert usage["input_tokens"] == 180
     assert usage["output_tokens"] == 50
-    assert usage["cost_micros"] > 0
+    assert usage["model"] == lease_logic.DEFAULT_MODEL
+    assert "cost_micros" not in usage
 
 
 def test_extract_clauses_usage_survives_a_late_failure(monkeypatch):
@@ -215,3 +266,74 @@ def test_extract_clauses_rejects_unusable_model_output(monkeypatch):
         assert exc.usage["input_tokens"] == 50  # billed even though the output was unusable
     else:
         raise AssertionError("expected ModelCallError for unusable model output")
+
+
+def test_extract_clauses_marks_a_rejected_key_non_retryable(monkeypatch):
+    class _AuthError(Exception):
+        status_code = 401
+
+    monkeypatch.setitem(
+        sys.modules,
+        "anthropic",
+        _FakeAnthropicModule([_AuthError("invalid x-api-key")]),
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+
+    try:
+        lease_logic.extract_clauses(["some page text"])
+    except lease_logic.ModelCallError as exc:
+        assert exc.retryable is False, "a rejected key is configuration, not a blip"
+    else:
+        raise AssertionError("expected ModelCallError")
+
+
+def test_extract_clauses_marks_a_rate_limit_retryable(monkeypatch):
+    class _RateLimitedError(Exception):
+        status_code = 429
+
+    monkeypatch.setitem(
+        sys.modules,
+        "anthropic",
+        _FakeAnthropicModule([_RateLimitedError("slow down")]),
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+
+    try:
+        lease_logic.extract_clauses(["some page text"])
+    except lease_logic.ModelCallError as exc:
+        assert exc.retryable is True
+    else:
+        raise AssertionError("expected ModelCallError")
+
+
+def test_extract_clauses_drops_an_invented_quote_but_keeps_a_real_one(monkeypatch):
+    real = {
+        "clause_type": "renewal",
+        "text_quote": "Tenant may renew for one additional term of five years.",
+        "page_number": 1,
+        "confidence_score": 0.9,
+    }
+    invented = {
+        "clause_type": "financial",
+        "text_quote": "Rent increases by twelve percent annually.",  # on no page
+        "page_number": 1,
+        "confidence_score": 0.99,
+    }
+    monkeypatch.setitem(
+        sys.modules,
+        "anthropic",
+        _FakeAnthropicModule([_FakeResponse([real, invented])]),
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+
+    clauses, _ = lease_logic.extract_clauses(
+        ["Tenant may renew for one additional term of five years."]
+    )
+    assert [c["text_quote"] for c in clauses] == [real["text_quote"]]
+
+
+def test_tool_schema_matches_the_golden_fixture():
+    # Changing the schema the model is held to should be a deliberate act, as
+    # it is for realty-lead-gen and investment-due-diligence.
+    golden = json.loads((Path(__file__).parent / "golden" / "record_clauses_tool_schema.json").read_text())
+    assert lease_logic._build_tool_schema() == golden

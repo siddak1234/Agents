@@ -20,8 +20,6 @@ runtime:
       - "ANTHROPIC_API_KEY"
       - "LEASE_AGENT_MODEL"
       - "LEASE_AGENT_CHUNK_SIZE"
-      - "LEASE_AGENT_INPUT_PRICE_PER_MTOK"
-      - "LEASE_AGENT_OUTPUT_PRICE_PER_MTOK"
 
 capabilities:
   - name: describe
@@ -44,15 +42,23 @@ capabilities:
       as an array of per-page text. Uses a language model with multi-shot
       prompting and a tool schema for structured output. Returns each
       clause's type, exact source quote, physical page number, and a
-      confidence score.
+      confidence score. Every quote returned has been found in the pages
+      supplied — a clause the model cannot be shown to have read is dropped
+      rather than reported with a guessed page. Requires ANTHROPIC_API_KEY,
+      and returns `unavailable` rather than failing when it is absent.
     input_schema:
       type: object
       required: [lease_pages]
       properties:
         lease_pages:
           type: array
+          minItems: 1
+          maxItems: 1000
           items: { type: string }
-          description: Raw text of each physical page, in order; index 0 is page 1.
+          description: >-
+            Raw text of each physical page, in order; index 0 is page 1.
+            At most 1000 pages — each chunk of pages costs one model call,
+            so a longer document is split by the caller.
       additionalProperties: false
     output_schema:
       type: object

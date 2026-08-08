@@ -4,8 +4,9 @@ Two independent pieces of work live here:
   - calculate_deadline: pure date arithmetic, no external dependency.
   - extract_clauses: reads lease pages in bounded chunks, calls an LLM per
     chunk using multi-shot prompting and a tool schema, validates the
-    model's output against the types agent.yaml declares, and merges
-    results across chunks.
+    model's output against the types agent.yaml declares, checks every
+    quote against the page it claims to come from, and merges results
+    across chunks.
 
 Nothing here knows about the agentcall protocol. Every function takes and
 returns plain Python values, so this file can be tested by itself.
@@ -31,16 +32,10 @@ DEFAULT_CHUNK_SIZE = 20
 
 _MAX_OUTPUT_TOKENS_PER_CHUNK = 4096
 
-# Published per-million-token USD list pricing
-# (platform.claude.com/docs/en/about-claude/pricing, checked 2026-08-06).
-# Sonnet 5 is on introductory pricing through 2026-08-31, then moves to
-# $3 / $15. Override via LEASE_AGENT_INPUT_PRICE_PER_MTOK /
-# LEASE_AGENT_OUTPUT_PRICE_PER_MTOK if pricing has since changed.
-_DEFAULT_PRICE_PER_MTOK: dict[str, tuple[float, float]] = {
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-opus-4-8": (5.00, 25.00),
-    "claude-haiku-4-5-20251001": (1.00, 5.00),
-}
+# A lease longer than this is a caller splitting the document wrong, not a
+# lease. Each chunk is one billed call, so an unbounded page count is an
+# unbounded bill from a single request; refuse rather than spend.
+MAX_LEASE_PAGES = 1000
 
 _EXTRACTION_GUIDANCE = """\
 You are extracting clauses from a commercial lease excerpt. Work only from
@@ -110,14 +105,42 @@ class MissingDependencyError(LeaseLogicError):
 
 class ModelCallError(LeaseLogicError):
     """Raised when a model call fails, or returns output that doesn't pass
-    validation. May be transient. Carries usage accumulated before the
-    failure, since earlier chunk calls in the same request may already have
-    been billed even though this one failed.
+    validation. Carries usage accumulated before the failure, since earlier
+    chunk calls in the same request may already have been billed even though
+    this one failed, and whether trying again could possibly help.
     """
 
-    def __init__(self, message: str, usage: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        usage: dict[str, Any] | None = None,
+        *,
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
-        self.usage = usage or {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+        self.usage = usage or {"input_tokens": 0, "output_tokens": 0, "model": None}
+        self.retryable = retryable
+
+
+# Which failures are worth another attempt. Mirrors realty-lead-gen's
+# utils/http.py, so "does a retry help" is one answer across the repository
+# rather than a per-agent opinion: connection-level trouble and server-side
+# or rate-limit statuses are transient; anything the request itself got wrong
+# — a rejected key, a model name that does not exist — is not, and retrying
+# it only re-spends money on the identical rejection.
+_TRANSIENT_STATUS = frozenset({408, 409, 429})
+_TRANSIENT_EXC_NAMES = frozenset({"APIConnectionError", "APITimeoutError"})
+_SERVER_ERROR = 500
+
+
+def _is_transient(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status in _TRANSIENT_STATUS or status >= _SERVER_ERROR
+    return (
+        type(exc).__name__ in _TRANSIENT_EXC_NAMES
+        or isinstance(exc, ConnectionError | TimeoutError)
+    )
 
 
 def calculate_deadline(lease_end_date: str, notice_period_days: int) -> str:
@@ -126,17 +149,32 @@ def calculate_deadline(lease_end_date: str, notice_period_days: int) -> str:
         end = _dt.date.fromisoformat(lease_end_date)
     except ValueError as exc:
         raise LeaseLogicError(f"'lease_end_date' must be a real YYYY-MM-DD date: {exc}") from None
-    deadline = end - _dt.timedelta(days=notice_period_days)
+    try:
+        deadline = end - _dt.timedelta(days=notice_period_days)
+    except OverflowError:
+        # The caller's mistake, not ours — most often a unit mix-up, passing
+        # the notice period in seconds or milliseconds. Left uncaught this
+        # escapes as `internal`, which tells the caller nothing actionable.
+        raise LeaseLogicError(
+            f"'notice_period_days' ({notice_period_days}) reaches before year 1 "
+            f"from 'lease_end_date' {lease_end_date} — check the unit is days"
+        ) from None
     return deadline.isoformat()
 
 
-def extract_clauses(lease_pages: list[str]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def extract_clauses(lease_pages: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Extract renewal/financial/maintenance clauses using an LLM, chunked.
+
+    Every returned clause has had its quote found in the pages it was given —
+    one the model invented is dropped, not reported with a guessed page.
+
+    Callers are expected to have bounded `lease_pages` by MAX_LEASE_PAGES
+    already; agent_main does it, alongside its other input validation.
 
     Returns (clauses, usage). Raises MissingDependencyError if the anthropic
     package isn't installed, MissingCredentialError if the API key is not
-    configured (neither bills anything), or ModelCallError if a call fails
-    or returns unusable output (usage attached, reflecting anything already
+    configured (neither bills anything), or ModelCallError if a call fails or
+    returns unusable output (usage attached, reflecting anything already
     billed in this request).
     """
     try:
@@ -166,6 +204,7 @@ def extract_clauses(lease_pages: list[str]) -> tuple[list[dict[str, Any]], dict[
             response = client.messages.create(
                 model=model,
                 max_tokens=_MAX_OUTPUT_TOKENS_PER_CHUNK,
+                temperature=0.0,
                 tools=[tool],
                 tool_choice={"type": "tool", "name": "record_clauses"},
                 messages=[{"role": "user", "content": prompt}],
@@ -174,36 +213,49 @@ def extract_clauses(lease_pages: list[str]) -> tuple[list[dict[str, Any]], dict[
             raise ModelCallError(
                 f"model call failed on pages {start + 1}-{end}: {exc}",
                 usage=_usage_dict(model, input_tokens, output_tokens),
+                retryable=_is_transient(exc),
             ) from exc
 
         # This call's tokens are billed now, regardless of what happens next.
         input_tokens += getattr(response.usage, "input_tokens", 0)
         output_tokens += getattr(response.usage, "output_tokens", 0)
 
+        # Anything the model hands back is suspect until checked, so a parse
+        # failure here is still a billed call and must carry its usage out.
         try:
             raw_clauses = _extract_tool_input(response)
         except ModelCallError as exc:
             exc.usage = _usage_dict(model, input_tokens, output_tokens)
             raise
+        except Exception as exc:
+            raise ModelCallError(
+                f"model returned an unreadable tool call on pages {start + 1}-{end}: {exc}",
+                usage=_usage_dict(model, input_tokens, output_tokens),
+            ) from exc
 
-        valid = [c for c in raw_clauses if _is_well_formed(c)]
-        if raw_clauses and not valid:
+        kept = [
+            cleaned
+            for c in raw_clauses
+            if _is_well_formed(c) and (cleaned := _clean_clause(c, lease_pages)) is not None
+        ]
+        if raw_clauses and not kept:
             # The model responded, and tokens were billed, but nothing it
-            # returned matches the schema we declared — that's the model's
-            # dependency failing, not a bad request from our caller.
+            # returned survived validation against the schema we declared —
+            # that's the model's dependency failing, not a bad request from
+            # our caller.
             raise ModelCallError(
                 f"model returned {len(raw_clauses)} clause(s) on pages {start + 1}-{end} "
                 "that failed validation against the declared schema",
                 usage=_usage_dict(model, input_tokens, output_tokens),
             )
-        if len(valid) < len(raw_clauses):
+        if len(kept) < len(raw_clauses):
             print(
-                f"lease_logic: dropped {len(raw_clauses) - len(valid)} malformed "
-                f"clause(s) on pages {start + 1}-{end}",
+                f"lease_logic: dropped {len(raw_clauses) - len(kept)} clause(s) on pages "
+                f"{start + 1}-{end} — malformed, or quoting text found on no page",
                 file=sys.stderr,
             )
 
-        all_clauses.extend(_clean_clause(c, lease_pages) for c in valid)
+        all_clauses.extend(kept)
 
     return all_clauses, _usage_dict(model, input_tokens, output_tokens)
 
@@ -228,12 +280,14 @@ def _build_tool_schema() -> dict[str, Any]:
         "input_schema": {
             "type": "object",
             "required": ["clauses"],
+            "additionalProperties": False,
             "properties": {
                 "clauses": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "required": ["clause_type", "text_quote", "page_number", "confidence_score"],
+                        "additionalProperties": False,
                         "properties": {
                             "clause_type": {"type": "string", "enum": list(VALID_CLAUSE_TYPES)},
                             "text_quote": {"type": "string"},
@@ -285,55 +339,58 @@ def _is_well_formed(clause: dict[str, Any]) -> bool:
     return True
 
 
-def _clean_clause(clause: dict[str, Any], lease_pages: list[str]) -> dict[str, Any]:
-    """Recompute page_number from the real page text instead of trusting the model's guess."""
+def _clean_clause(clause: dict[str, Any], lease_pages: list[str]) -> dict[str, Any] | None:
+    """Verify the quote against the source pages, or drop the clause.
+
+    agent.yaml promises `text_quote` is "copied verbatim from the source page"
+    and `page_number` is where it was found. A quote that appears on no page
+    honours neither, and the model's own claimed page number is not evidence
+    that it does — so an unverifiable clause is model output that failed
+    validation, exactly like a bad `clause_type`, and leaves by the same door.
+    Returning it with the model's guessed page and untouched confidence would
+    make a fabricated citation indistinguishable from a checked one.
+    """
     quote = str(clause["text_quote"])
-    page_number = _locate_page(quote, lease_pages, fallback=int(clause["page_number"]))
-    confidence = max(0.0, min(1.0, float(clause["confidence_score"])))
+    page_number = _locate_page(quote, lease_pages)
+    if page_number is None:
+        return None
     return {
         "clause_type": clause["clause_type"],
         "text_quote": quote,
         "page_number": page_number,
-        "confidence_score": confidence,
+        "confidence_score": max(0.0, min(1.0, float(clause["confidence_score"]))),
     }
 
 
-def _locate_page(quote: str, lease_pages: list[str], fallback: int) -> int:
+def _locate_page(quote: str, lease_pages: list[str]) -> int | None:
+    """The 1-indexed page whose text contains `quote`, or None if none does.
+
+    Whitespace is collapsed on both sides first: page text pulled out of a PDF
+    carries the line breaks the layout happened to have, so a quote that is
+    genuinely verbatim still rarely matches byte-for-byte.
+    """
+    needle = _collapse_whitespace(quote)
+    if not needle:
+        return None
     for i, page_text in enumerate(lease_pages):
-        if quote in page_text:
+        if needle in _collapse_whitespace(page_text):
             return i + 1
-    return max(1, min(fallback, len(lease_pages)))
+    return None
 
 
-def _usage_dict(model: str, input_tokens: int, output_tokens: int) -> dict[str, int]:
+def _collapse_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _usage_dict(model: str | None, input_tokens: int, output_tokens: int) -> dict[str, Any]:
+    """What this agent observed spending: tokens, and the model it called.
+
+    Never money. docs/AGENT_PROTOCOL.md: a price is a vendor fact that changes
+    without notice, so cost is derived once where it is needed rather than
+    copied into every agent, where N copies age independently.
+    """
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "cost_micros": _estimate_cost_micros(model, input_tokens, output_tokens),
+        "model": model,
     }
-
-
-def _estimate_cost_micros(model: str, input_tokens: int, output_tokens: int) -> int:
-    """Estimate cost in micros (1,000,000 micros = $1 USD) from real token counts.
-
-    Best-effort estimate from published list pricing (see
-    _DEFAULT_PRICE_PER_MTOK), overridable via LEASE_AGENT_INPUT_PRICE_PER_MTOK
-    / LEASE_AGENT_OUTPUT_PRICE_PER_MTOK — not an authoritative billing figure.
-    """
-    in_rate, out_rate = _resolve_price_per_mtok(model)
-    if in_rate is None or out_rate is None:
-        print(f"lease_logic: no known price for model {model!r}; cost_micros will be 0", file=sys.stderr)
-        return 0
-    cost_dollars = (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
-    return round(cost_dollars * 1_000_000)
-
-
-def _resolve_price_per_mtok(model: str) -> tuple[float | None, float | None]:
-    override_in = os.environ.get("LEASE_AGENT_INPUT_PRICE_PER_MTOK")
-    override_out = os.environ.get("LEASE_AGENT_OUTPUT_PRICE_PER_MTOK")
-    if override_in and override_out:
-        try:
-            return float(override_in), float(override_out)
-        except ValueError:
-            pass
-    return _DEFAULT_PRICE_PER_MTOK.get(model, (None, None))
