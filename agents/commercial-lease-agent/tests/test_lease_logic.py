@@ -196,9 +196,10 @@ class _FakeToolUseBlock:
 
 
 class _FakeResponse:
-    def __init__(self, clauses, input_tokens=100, output_tokens=50):
+    def __init__(self, clauses, input_tokens=100, output_tokens=50, stop_reason="end_turn"):
         self.content = [_FakeToolUseBlock(clauses)]
         self.usage = _FakeUsage(input_tokens, output_tokens)
+        self.stop_reason = stop_reason
 
 
 class _FakeMessages:
@@ -438,3 +439,146 @@ def test_messages_create_never_sends_temperature(monkeypatch):
         "temperature must never be sent — claude-sonnet-5 rejects a "
         "non-default value with a 400 on every call"
     )
+
+
+def test_extract_clauses_rejects_a_truncated_tool_call(monkeypatch):
+    """stop_reason=max_tokens means output was cut off — the clauses that made
+    it through can still be syntactically valid, and nothing distinguishes
+    "the chunk held only these" from "there were more, never seen".
+    """
+    good_clause = {
+        "clause_type": "renewal",
+        "text_quote": "Tenant may renew for five years.",
+        "page_number": 1,
+        "confidence_score": 0.9,
+    }
+    monkeypatch.setitem(sys.modules, "anthropic", _FakeAnthropicModule([
+        _FakeResponse([good_clause], input_tokens=4000, output_tokens=4096,
+                       stop_reason="max_tokens"),
+    ]))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+
+    try:
+        lease_logic.extract_clauses(["Tenant may renew for five years."])
+    except lease_logic.ModelCallError as exc:
+        assert "truncated" in str(exc)
+        assert exc.usage["input_tokens"] == 4000  # billed even though rejected
+    else:
+        raise AssertionError("expected ModelCallError for a max_tokens-truncated response")
+
+
+def test_extract_clauses_accepts_a_normal_completion(monkeypatch):
+    """The default stop_reason must not itself trigger the truncation guard."""
+    good_clause = {
+        "clause_type": "renewal",
+        "text_quote": "Tenant may renew for five years.",
+        "page_number": 1,
+        "confidence_score": 0.9,
+    }
+    monkeypatch.setitem(sys.modules, "anthropic", _FakeAnthropicModule([
+        _FakeResponse([good_clause], stop_reason="end_turn"),
+    ]))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+
+    clauses, _unverified, _usage = lease_logic.extract_clauses(["Tenant may renew for five years."])
+    assert len(clauses) == 1
+
+
+def test_locate_page_does_not_match_across_a_column_gutter():
+    """A rent table's numbers, lined up under a header with wide gaps, are
+    not contiguous prose. Matching across that gap let a quote verify
+    against text that was never actually adjacent on the page.
+    """
+    page = "Base Rent          $42.00\nCAM Charges        $ 8.00"
+    assert lease_logic._locate_page("Base Rent $42.00 CAM Charges", [page]) is None
+
+
+def test_locate_page_tolerates_two_spaces_after_a_period():
+    """The gutter guard triggers at three-or-more spaces, not two — the
+    common typewriter convention of two spaces after a sentence must still
+    match normally.
+    """
+    page = "Tenant shall vacate the Premises.  Landlord may re-let immediately."
+    assert lease_logic._locate_page(
+        "Tenant shall vacate the Premises. Landlord may re-let immediately.", [page]
+    ) == 1
+
+
+def test_extract_clauses_dedupes_a_clause_restated_across_chunks(monkeypatch):
+    """The extraction prompt tells the model to report a clause once per
+    chunk; it cannot see other chunks, so a summary-then-body restatement
+    split across a chunk boundary reached the caller twice.
+    """
+    def cl(clause_type, quote, page, confidence):
+        return {"clause_type": clause_type, "text_quote": quote,
+                "page_number": page, "confidence_score": confidence}
+
+    quote = "Tenant may renew for five years upon notice."
+    monkeypatch.setitem(sys.modules, "anthropic", _FakeAnthropicModule([
+        _FakeResponse([cl("renewal", quote, 1, 0.7)]),
+        _FakeResponse([cl("renewal", quote, 2, 0.95)]),
+    ]))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+    monkeypatch.setenv("LEASE_AGENT_CHUNK_SIZE", "1")
+
+    clauses, _unverified, _usage = lease_logic.extract_clauses([quote, quote])
+
+    assert len(clauses) == 1
+    assert clauses[0]["confidence_score"] == 0.95  # the higher-confidence occurrence survives
+    assert clauses[0]["page_number"] == 2
+
+
+def test_extract_clauses_keeps_the_first_occurrence_on_a_confidence_tie(monkeypatch):
+    def cl(clause_type, quote, page, confidence):
+        return {"clause_type": clause_type, "text_quote": quote,
+                "page_number": page, "confidence_score": confidence}
+
+    quote = "Tenant shall pay Base Rent of $42.00 per foot."
+    monkeypatch.setitem(sys.modules, "anthropic", _FakeAnthropicModule([
+        _FakeResponse([cl("financial", quote, 1, 0.9)]),
+        _FakeResponse([]),
+        _FakeResponse([]),
+        _FakeResponse([]),
+        _FakeResponse([cl("financial", quote, 5, 0.9)]),
+    ]))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+    monkeypatch.setenv("LEASE_AGENT_CHUNK_SIZE", "1")
+
+    clauses, _unverified, _usage = lease_logic.extract_clauses([quote] + ["filler"] * 3 + [quote])
+
+    assert len(clauses) == 1
+    assert clauses[0]["page_number"] == 1  # earlier occurrence wins a tie
+
+
+def test_extract_clauses_does_not_merge_different_clause_types(monkeypatch):
+    """Same wording, different obligation types — must not collapse into one."""
+    def cl(clause_type, quote, page, confidence):
+        return {"clause_type": clause_type, "text_quote": quote,
+                "page_number": page, "confidence_score": confidence}
+
+    quote = "Tenant shall maintain the equipment in good condition."
+    monkeypatch.setitem(sys.modules, "anthropic", _FakeAnthropicModule([
+        _FakeResponse([cl("maintenance", quote, 1, 0.9)]),
+        _FakeResponse([cl("financial", quote, 2, 0.9)]),
+    ]))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+    monkeypatch.setenv("LEASE_AGENT_CHUNK_SIZE", "1")
+
+    clauses, _unverified, _usage = lease_logic.extract_clauses([quote, quote])
+
+    assert len(clauses) == 2
+
+
+def test_dedupe_clauses_is_a_pure_function():
+    def cl(clause_type, quote, page, confidence):
+        return {"clause_type": clause_type, "text_quote": quote,
+                "page_number": page, "confidence_score": confidence}
+
+    out = lease_logic._dedupe_clauses([
+        cl("renewal", "same text", 1, 0.6),
+        cl("renewal", "same text", 3, 0.6),
+        cl("renewal", "different text entirely", 2, 0.5),
+    ])
+    assert len(out) == 2
+    assert out[0]["page_number"] == 1  # tie kept the first
+    assert out[1]["text_quote"] == "different text entirely"

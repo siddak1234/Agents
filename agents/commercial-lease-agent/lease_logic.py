@@ -263,6 +263,22 @@ def extract_clauses(
         input_tokens += getattr(response.usage, "input_tokens", 0)
         output_tokens += getattr(response.usage, "output_tokens", 0)
 
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            # A truncated tool call can still be syntactically valid JSON —
+            # the model may have finished several complete clause objects
+            # before running out of room for the rest. Nothing about the
+            # clauses we did get distinguishes "the chunk held only these"
+            # from "there were more, and we never saw them". Reporting the
+            # partial list as a complete answer would silently under-report
+            # a lease's obligations, which is the one failure this agent
+            # exists to avoid.
+            raise ModelCallError(
+                f"model output for pages {start + 1}-{end} was truncated at "
+                f"max_tokens ({_MAX_OUTPUT_TOKENS_PER_CHUNK}) — some clauses may be "
+                "missing; lower LEASE_AGENT_CHUNK_SIZE to shrink each chunk's output",
+                usage=_usage_dict(model, input_tokens, output_tokens),
+            )
+
         # Anything the model hands back is suspect until checked, so a parse
         # failure here is still a billed call and must carry its usage out.
         try:
@@ -299,7 +315,38 @@ def extract_clauses(
             # never allowed to sink the chunks that did verify.
             (all_clauses if cleaned["page_number"] is not None else unverified).append(cleaned)
 
-    return all_clauses, unverified, _usage_dict(model, input_tokens, output_tokens)
+    return _dedupe_clauses(all_clauses), unverified, _usage_dict(model, input_tokens, output_tokens)
+
+
+def _dedupe_clauses(clauses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse a clause the model restated across a chunk boundary.
+
+    The extraction prompt already tells the model to report a clause once,
+    "from the most complete instance", when one chunk sees it twice — a
+    summary sheet restating the same renewal right the body states again.
+    That instruction is per-chunk; the model cannot see other chunks, so
+    the identical restatement split across two chunks reaches this
+    function as two entries instead of one.
+
+    Keyed on clause_type and the exact normalised quote — the same fold
+    `_locate_page` uses, so two entries merge only when they would also
+    have verified as the same text. A paraphrase that differs even
+    slightly is not merged: this function has no more grounds than a
+    caller does for deciding two different wordings mean the same thing.
+    Of the two, the higher-confidence one survives; a tie keeps whichever
+    was found first, which — chunks being processed in page order — is
+    the earlier occurrence in the document.
+    """
+    kept: dict[tuple[str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str]] = []
+    for clause in clauses:
+        key = (clause["clause_type"], _normalise(clause["text_quote"]))
+        if key not in kept:
+            order.append(key)
+            kept[key] = clause
+        elif clause["confidence_score"] > kept[key]["confidence_score"]:
+            kept[key] = clause
+    return [kept[key] for key in order]
 
 
 def _chunk_ranges(total_pages: int, chunk_size: int) -> list[tuple[int, int]]:
@@ -447,11 +494,23 @@ def _normalise(text: str) -> str:
     those are ordinary in legal PDFs. Folding them costs nothing that matters —
     figures, negation and which party owes the obligation all still have to
     match exactly.
+
+    Three or more consecutive spaces or tabs is column alignment, not prose —
+    a rent table's figures lined up under a header, not two words with extra
+    room between them. Collapsing that run down to one space the way ordinary
+    whitespace collapses let a quote match across a column gutter: text that
+    was never contiguous on the page verified as if it had been. The run is
+    replaced with a character no real quote contains, so nothing can bridge
+    it. This is a heuristic, not a certainty — a justified PDF that happens to
+    lay three spaces between two words in running prose would also fail to
+    match here, and there is no way to tell that case apart from a table
+    short of reading the page's layout, which this function does not have.
     """
     text = _LINE_BREAK_HYPHEN.sub(r"\1\2", text)
     text = unicodedata.normalize("NFKC", text)
     text = text.replace("­", "")
     text = text.translate(_PUNCTUATION_FOLD)
+    text = _COLUMN_GUTTER.sub("\x00", text)
     return " ".join(text.split()).casefold()
 
 
@@ -464,6 +523,9 @@ _LINE_BREAK_HYPHEN = re.compile("(\\w)[-\u2010\u2011]\\s*\\n\\s*(\\w)")
 _SMART = "\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u2013\u2014\u2015\u2010\u2011\u00a0"
 _PLAIN = "''''" + '"""' + "-----" + " "
 _PUNCTUATION_FOLD = str.maketrans(_SMART, _PLAIN)
+
+#: Three or more spaces/tabs in a row — the column-alignment signature.
+_COLUMN_GUTTER = re.compile("[ \t]{3,}")
 
 
 def _usage_dict(model: str | None, input_tokens: int, output_tokens: int) -> dict[str, Any]:
