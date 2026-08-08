@@ -162,15 +162,13 @@ def _grade_photos(payload: dict[str, Any]) -> dict[str, Any]:
         usage={
             "input_tokens": usage.input_tokens,
             "output_tokens": usage.output_tokens,
-            # The envelope's unit is micros of USD, which is what LlmUsage
-            # already tracks; the field is renamed, not converted.
-            "cost_micros": usage.cost_usd_micros,
+            "model": usage.model,
         },
     )
 
 
 def _ok(
-    capability: str, output: dict[str, Any], usage: dict[str, int] | None = None
+    capability: str, output: dict[str, Any], usage: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     return {
         "protocol": PROTOCOL,
@@ -193,8 +191,8 @@ def _fail(capability: str, etype: str, message: str, *, retryable: bool = False)
     }
 
 
-def _zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+def _zero_usage() -> dict[str, Any]:
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 if __name__ == "__main__":

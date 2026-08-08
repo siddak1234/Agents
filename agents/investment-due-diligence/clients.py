@@ -33,15 +33,6 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 # Cap output: recommendation is a five-field JSON object; a few hundred
 # tokens is enough. Without a ceiling a degenerate completion can run away.
 GROQ_MAX_TOKENS = 512
-# Groq on-demand list price for llama-3.3-70b-versatile (USD per 1M tokens).
-# Reference: console.groq.com/docs/model/llama-3.3-70b-versatile
-GROQ_INPUT_USD_PER_MTOK = 0.59
-GROQ_OUTPUT_USD_PER_MTOK = 0.79
-# Tavily bills per API credit. Every search this agent runs is
-# `search_depth: "basic"`, which costs 1 credit; advanced would cost 2.
-# Reference: docs.tavily.com/documentation/api-credits and tavily.com/pricing
-TAVILY_CREDITS_PER_SEARCH = 1
-TAVILY_USD_PER_CREDIT = 0.008
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 # Nominatim's usage policy requires a real identifying User-Agent on every
@@ -59,28 +50,24 @@ USER_AGENT = "investment-due-diligence-agent/1.0"
 # call stack, so a request that paid for two searches and *then* failed
 # still reports what it spent instead of zero. agent_main.py reads it once,
 # where the envelope is built.
-_spend = {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+_spend: dict[str, object] = {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 def reset_spend() -> None:
     """Zeroes the tally. Called per request so in-process tests don't accrue."""
-    _spend.update(input_tokens=0, output_tokens=0, cost_micros=0)
+    _spend.update(input_tokens=0, output_tokens=0, model=None)
 
 
-def spent_usage() -> dict[str, int]:
+def spent_usage() -> dict[str, object]:
     """What this request has spent so far, in the `usage` wire shape."""
     return dict(_spend)
 
 
-def _record(*, input_tokens: int = 0, output_tokens: int = 0, cost_micros: int = 0) -> None:
-    _spend["input_tokens"] += input_tokens
-    _spend["output_tokens"] += output_tokens
-    _spend["cost_micros"] += cost_micros
-
-
-def tavily_cost_micros(searches: int) -> int:
-    """USD micros (1_000_000 = $1) for `searches` basic Tavily searches."""
-    return round(searches * TAVILY_CREDITS_PER_SEARCH * TAVILY_USD_PER_CREDIT * 1_000_000)
+def _record(*, input_tokens: int = 0, output_tokens: int = 0, model: str | None = None) -> None:
+    _spend["input_tokens"] = int(_spend["input_tokens"]) + input_tokens  # type: ignore[arg-type]
+    _spend["output_tokens"] = int(_spend["output_tokens"]) + output_tokens  # type: ignore[arg-type]
+    if model is not None:
+        _spend["model"] = model
 
 
 def _tavily_api_key() -> str | None:
@@ -151,9 +138,6 @@ def tavily_search(query: str, *, max_results: int = 5, timeout: float = 15) -> l
         },
     )
     data = _call(request, timeout=timeout, service="Tavily search")
-    # Counted only once the call came back 200: a rejected key, a 429 or a
-    # connection failure raises out of `_call` above and bills nothing.
-    _record(cost_micros=tavily_cost_micros(1))
     results = data.get("results", [])
     return results if isinstance(results, list) else []
 
@@ -212,11 +196,7 @@ def groq_tool_call(
     raw_usage = data.get("usage") or {}
     input_tokens = int(raw_usage.get("prompt_tokens", 0) or 0)
     output_tokens = int(raw_usage.get("completion_tokens", 0) or 0)
-    _record(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cost_micros=groq_cost_micros(input_tokens, output_tokens),
-    )
+    _record(input_tokens=input_tokens, output_tokens=output_tokens, model=GROQ_MODEL)
 
     try:
         call = data["choices"][0]["message"]["tool_calls"][0]
@@ -231,14 +211,6 @@ def groq_tool_call(
         raise ConnectionError("Groq returned tool arguments that are not an object")
 
     return parsed
-
-
-def groq_cost_micros(input_tokens: int, output_tokens: int) -> int:
-    """USD micros (1_000_000 = $1) for a Groq llama-3.3-70b-versatile call."""
-    cost_dollars = (input_tokens / 1_000_000) * GROQ_INPUT_USD_PER_MTOK + (
-        output_tokens / 1_000_000
-    ) * GROQ_OUTPUT_USD_PER_MTOK
-    return round(cost_dollars * 1_000_000)
 
 
 def _call(request: urllib.request.Request, *, timeout: float, service: str) -> dict[str, Any]:

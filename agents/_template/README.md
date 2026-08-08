@@ -13,7 +13,7 @@ echo '{"protocol":"agentcall/v1","capability":"greet","input":{"name":"Dak"}}' \
 ```json
 {"protocol": "agentcall/v1", "ok": true, "capability": "greet",
  "output": {"greeting": "Hello, Dak!"},
- "usage": {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0},
+ "usage": {"input_tokens": 0, "output_tokens": 0, "model": null},
  "error": null}
 ```
 

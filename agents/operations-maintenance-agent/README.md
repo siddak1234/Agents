@@ -66,7 +66,7 @@ Example response:
   "usage": {
     "input_tokens": 842,
     "output_tokens": 213,
-    "cost_micros": 5721
+    "model": "claude-sonnet-4-5"
   },
   "error": null
 }
@@ -74,9 +74,10 @@ Example response:
 
 The plan comes back through a forced tool call (`record_maintenance_plan`),
 not by parsing JSON out of the model's prose, so a fenced or chatty reply
-cannot turn a good plan into a failure. `cost_micros` is priced from the real
-token counts — see `_MODEL_PRICING` in `planner.py`, which carries the same
-rates as `realty-lead-gen`.
+cannot turn a good plan into a failure. `usage` reports the real token counts
+and the model that produced them, and no money: a price is a vendor fact that
+changes without notice, so cost is derived where it is needed rather than
+copied into this agent. See `docs/AGENT_PROTOCOL.md`.
 
 ---
 

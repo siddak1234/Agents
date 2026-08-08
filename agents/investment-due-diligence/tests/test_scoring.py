@@ -33,7 +33,6 @@ from analysis import (
     _score_financials,
 )
 from budget import DeadlineBudget
-from clients import groq_cost_micros
 from recommendation import MAX_EVIDENCE_BYTES, _enforce_evidence_size, _validate_output
 
 
@@ -210,20 +209,6 @@ class TestValidateOutput(unittest.TestCase):
         self.assertIsNone(_validate_output({**base, "recommended_offer_price_inr": True})["recommended_offer_price_inr"])
         self.assertIsNone(_validate_output({**base, "recommended_offer_price_inr": "cheap"})["recommended_offer_price_inr"])
         self.assertIsNone(_validate_output(base)["recommended_offer_price_inr"])
-
-
-class TestGroqCostMicros(unittest.TestCase):
-    def test_zero_tokens_is_zero(self):
-        self.assertEqual(groq_cost_micros(0, 0), 0)
-
-    def test_one_million_input_tokens(self):
-        # 1M input @ $0.59/MTok → $0.59 → 590_000 micros
-        self.assertEqual(groq_cost_micros(1_000_000, 0), 590_000)
-
-    def test_mixed_input_and_output(self):
-        # 259 in + 88 out matches a typical recommendation call shape
-        expected = round(((259 / 1_000_000) * 0.59 + (88 / 1_000_000) * 0.79) * 1_000_000)
-        self.assertEqual(groq_cost_micros(259, 88), expected)
 
 
 class TestEvidenceSizeBound(unittest.TestCase):

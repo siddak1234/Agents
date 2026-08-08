@@ -48,7 +48,7 @@ Exactly one JSON object on stdout. Nothing else, ever.
   "ok": true,
   "capability": "grade_photos",
   "output": { "overall_condition": "C4", "rehab_total_low_cents": 1850000 },
-  "usage": { "input_tokens": 4210, "output_tokens": 380, "cost_micros": 21400 },
+  "usage": { "input_tokens": 4210, "output_tokens": 380, "model": "claude-sonnet-4-5" },
   "error": null
 }
 ```
@@ -56,6 +56,32 @@ Exactly one JSON object on stdout. Nothing else, ever.
 On failure, `ok` is `false`, `output` is `null`, and `error` is populated.
 `usage` is always present, zeroed when nothing was spent — accounting that is
 optional gets forgotten.
+
+`usage` reports what the agent **observed**: tokens it was told it used, and
+the model it called (`null` when it called none). It does not report money.
+
+That is a correction, not an omission. `usage` carried a `cost_micros` field
+until an audit found three agents each maintaining a private copy of a vendor
+price list to populate it — one of them wrong in three rows, priced from a
+model generation two releases old, overstating Opus threefold and
+understating Haiku fourfold. Nothing consumed the number, so nothing noticed.
+A price is a vendor fact that changes without notice; a token count is a fact
+the agent watched happen. Copying the first into every agent means N copies
+ageing independently, and the field they feed had no reader.
+
+So cost is derived, once, wherever someone actually needs it — from `model`
+and the token counts, against a single table owned there. Until something
+needs it, no table exists to go stale. An agent that wants its spend visible
+reports the model honestly and stops.
+
+**What existing agents must do, and when.** Replace `cost_micros` with
+`model` in every `usage` object you emit, and delete the price table it was
+computed from. Do it now: `Usage.from_wire` no longer reads `cost_micros`, so
+an agent still emitting it reports `model: null` — it decodes, and silently
+claims no model was called. `model` is a string when the capability called
+one and `null` when it did not; a non-string is a protocol error. All five
+agents in this repository were migrated in the commit that changed this
+file.
 
 | `error.type` | Meaning | `retryable` |
 |---|---|---|

@@ -34,7 +34,6 @@ import agent_main
 import analysis
 import clients
 import recommendation
-from clients import groq_cost_micros, tavily_cost_micros
 from recommendation import RECOMMENDATION_TOOL, RECOMMENDATION_TOOL_NAME
 
 FAKE_KEYS = {"TAVILY_API_KEY": "stub-not-a-real-key", "GROQ_API_KEY": "stub-not-a-real-key"}
@@ -344,11 +343,13 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         self.assertTrue(envelope["ok"], envelope)
         self.assertEqual(envelope["output"]["market_value"], "Overvalued")
         self.assertEqual(len(transport.calls), 2)
-        # Tavily bills per search and returns no tokens.
+        # Search spends Tavily credits, not tokens, and calls no model: the
+        # envelope reports zeros and a null model rather than inventing a
+        # number. Search count is asserted above, where it is observable.
         self.assertEqual(envelope["usage"], {
             "input_tokens": 0,
             "output_tokens": 0,
-            "cost_micros": tavily_cost_micros(2),
+            "model": None,
         })
 
     def test_location_bills_searches_but_not_geocoding(self):
@@ -368,8 +369,7 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         self.assertTrue(envelope["ok"], envelope)
         self.assertEqual(envelope["output"]["coordinates"], {"latitude": 12.9698, "longitude": 77.75})
         self.assertEqual(len(transport.calls), 3)  # geocode + 2 searches
-        # OpenStreetMap is free; only the two searches are billable.
-        self.assertEqual(envelope["usage"]["cost_micros"], tavily_cost_micros(2))
+        self.assertIsNone(envelope["usage"]["model"])
 
     def test_risk_assessment_bills_three_searches(self):
         transport = _Transport(
@@ -386,7 +386,7 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         )
         self.assertTrue(envelope["ok"], envelope)
         self.assertEqual(len(transport.calls), 3)
-        self.assertEqual(envelope["usage"]["cost_micros"], tavily_cost_micros(3))
+        self.assertIsNone(envelope["usage"]["model"])
 
     def test_a_residential_address_containing_shop_is_accepted(self):
         """"Bishop" contains "shop"; both are real Indian residential roads."""
@@ -437,7 +437,7 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
         self.assertTrue(envelope["error"]["retryable"])
-        self.assertEqual(envelope["usage"]["cost_micros"], tavily_cost_micros(1))
+        self.assertIsNone(envelope["usage"]["model"])
 
     def test_recommendation_forces_the_tool_and_reports_tokens(self):
         transport = _Transport(
@@ -467,7 +467,7 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         self.assertEqual(envelope["usage"], {
             "input_tokens": 259,
             "output_tokens": 88,
-            "cost_micros": groq_cost_micros(259, 88),
+            "model": "llama-3.3-70b-versatile",
         })
 
     def test_tavily_request_authenticates_by_header_not_body(self):
@@ -535,7 +535,7 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         self.assertEqual(envelope["error"]["type"], "unavailable")
         self.assertTrue(envelope["error"]["retryable"])
         self.assertEqual(envelope["usage"]["input_tokens"], 259)
-        self.assertEqual(envelope["usage"]["cost_micros"], groq_cost_micros(259, 88))
+        self.assertEqual(envelope["usage"]["model"], "llama-3.3-70b-versatile")
 
     def test_a_different_tool_name_is_refused(self):
         transport = _Transport(
@@ -560,7 +560,7 @@ class TestEnvelopeAndSpend(unittest.TestCase):
         envelope = agent_main.dispatch(request)
         self.assertTrue(envelope["ok"], envelope)
         self.assertEqual(
-            envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+            envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "model": None}
         )
 
     def test_a_bad_deadline_still_fails_a_capability_that_uses_it(self):

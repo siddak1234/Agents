@@ -108,7 +108,7 @@ def fail(capability: str, etype: str, message: str, *, retryable: bool = False) 
 
 
 def zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 if __name__ == "__main__":

@@ -21,9 +21,8 @@ from prompts import SYSTEM_PROMPT
 #
 # Changing this is not a one-line edit. `temperature` below is accepted on this
 # model and is rejected outright — HTTP 400, not a warning — by Sonnet 5, Opus
-# 4.7 and everything after them. Newer models also want their own row in
-# _MODEL_PRICING. Bump the model and those two together, or the first call
-# after the bump fails.
+# 4.7 and everything after them. Check `temperature` against the target
+# model before bumping, or the first call after the bump fails.
 MODEL = "claude-sonnet-4-5"
 
 # Per-attempt ceiling and retry count are the SDK's own, rather than a
@@ -46,23 +45,6 @@ MAX_TOKENS = 4096
 # rendered into a single prompt and went to a paid call. Set it to whatever a
 # shift actually looks like; do not remove it.
 MAX_PROMPT_CHARS = 200_000
-
-# USD per million tokens. Only rows this agent can actually bill against, so
-# that a wrong number is a number someone notices.
-#
-# Deliberately NOT the whole table from realty-lead-gen's claude_client.py.
-# That one carries rows for models this agent never calls, and two of them
-# disagree with Anthropic's published rates — haiku-4-5 at (0.25, 1.25) against
-# a real $1.00/$5.00, and opus-4-5 at (15.00, 75.00) where the whole Opus 4.6+
-# line is $5.00/$25.00. Copying a table wholesale is how a stale rate outlives
-# the agent that introduced it; copy the row you use.
-_MODEL_PRICING: dict[str, tuple[float, float]] = {
-    # Sonnet-tier rate, matching what realty-lead-gen bills this model at.
-    "claude-sonnet-4-5": (3.00, 15.00),
-    # A model this agent does not call today prices at the Sonnet-tier rate
-    # rather than silently at zero. Set the real rate before switching MODEL.
-    "_default": (3.00, 15.00),
-}
 
 TOOL_NAME = "record_maintenance_plan"
 
@@ -146,25 +128,21 @@ class ModelOutputError(RuntimeError):
         self.usage = usage or zero_usage()
 
 
-def zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+def zero_usage() -> dict[str, object]:
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
-def price(model: str, input_tokens: int, output_tokens: int) -> dict[str, int]:
-    """Token counts plus a cost in millionths of a dollar.
+def usage_for(model: str, input_tokens: int, output_tokens: int) -> dict[str, object]:
+    """Token counts plus the model that produced them.
 
-    A rate in USD per million tokens is also, exactly, a rate in micros per
-    token — (tokens / 1e6) * rate * 1e6 is just tokens * rate. Going straight
-    there keeps the sub-cent arithmetic off a float that cannot represent it:
-    1000 input and 500 output tokens at $3/$15 is 10_500 micros, where the
-    round trip through dollars yields 0.010499999999999999 and truncates to
-    10_499.
+    No money. A price is a vendor fact that changes without notice; this
+    agent reports what it observed and lets cost be derived where it is
+    actually needed. See docs/AGENT_PROTOCOL.md.
     """
-    input_rate, output_rate = _MODEL_PRICING.get(model, _MODEL_PRICING["_default"])
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "cost_micros": round(input_tokens * input_rate + output_tokens * output_rate),
+        "model": model,
     }
 
 
@@ -276,7 +254,7 @@ def generate_maintenance_plan(payload: dict[str, Any]) -> dict[str, Any]:
 
     # Priced before the output is inspected, so a failure below still reports
     # what the call actually cost.
-    usage = price(MODEL, response.usage.input_tokens, response.usage.output_tokens)
+    usage = usage_for(MODEL, response.usage.input_tokens, response.usage.output_tokens)
 
     plan = _tool_payload(response)
     if plan is None:

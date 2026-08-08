@@ -45,13 +45,35 @@ def _usage_count(raw: dict[str, Any], field: str) -> int:
     return value
 
 
+def _usage_model(raw: dict[str, Any]) -> str | None:
+    """The model an agent called, or None when it called none.
+
+    Absent is the same claim as `null` here: an agent that ran no model has
+    no model to name. A non-string is a bug worth surfacing rather than
+    coercing, for the same reason `_usage_count` refuses one.
+    """
+    value = raw.get("model")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ProtocolError(
+            f"usage.model must be a string or null, got {type(value).__name__} {value!r}"
+        )
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Usage:
-    """Resource accounting. Always present, zeroed when nothing was spent."""
+    """What an agent observed spending. Always present, zeroed when nothing was.
+
+    Tokens and a model name, never money. See docs/AGENT_PROTOCOL.md: a price
+    is a vendor fact that changes without notice, so it is derived where it is
+    needed rather than copied into every agent.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
-    cost_micros: int = 0
+    model: str | None = None
 
     @classmethod
     def from_wire(cls, raw: Any) -> Usage:
@@ -64,9 +86,8 @@ class Usage:
 
         Zeros an agent *declared* and zeros the orchestrator *invented* are
         different claims, and the whole point of mandatory accounting is that
-        the second one is not available. Cost aggregation across agents is on
-        the roadmap and would have been built on a field that was optional in
-        practice.
+        the second one is not available. Any aggregation built on top of this
+        would otherwise rest on a field that was optional in practice.
         """
         if not isinstance(raw, dict):
             raise ProtocolError(
@@ -76,14 +97,14 @@ class Usage:
         return cls(
             input_tokens=_usage_count(raw, "input_tokens"),
             output_tokens=_usage_count(raw, "output_tokens"),
-            cost_micros=_usage_count(raw, "cost_micros"),
+            model=_usage_model(raw),
         )
 
-    def to_wire(self) -> dict[str, int]:
+    def to_wire(self) -> dict[str, Any]:
         return {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "cost_micros": self.cost_micros,
+            "model": self.model,
         }
 
 

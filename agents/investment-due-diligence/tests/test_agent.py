@@ -77,7 +77,7 @@ class TestDescribe(unittest.TestCase):
     def test_costs_nothing_and_needs_no_keys(self):
         envelope = call("describe")
         self.assertTrue(envelope["ok"])
-        self.assertEqual(envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0})
+        self.assertEqual(envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "model": None})
 
 
 class TestProtocolHygiene(unittest.TestCase):
