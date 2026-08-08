@@ -204,8 +204,10 @@ class _FakeResponse:
 class _FakeMessages:
     def __init__(self, queue):
         self._queue = list(queue)
+        self.calls: list[dict] = []
 
     def create(self, **kwargs):
+        self.calls.append(kwargs)
         item = self._queue.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -220,9 +222,11 @@ class _FakeClient:
 class _FakeAnthropicModule:
     def __init__(self, queue):
         self._queue = queue
+        self.last_client: _FakeClient | None = None
 
     def Anthropic(self, api_key):  # noqa: N802 — must match anthropic.Anthropic's real name
-        return _FakeClient(self._queue)
+        self.last_client = _FakeClient(self._queue)
+        return self.last_client
 
 
 
@@ -405,3 +409,32 @@ def test_one_chunks_miss_does_not_destroy_the_other_chunks(monkeypatch):
     assert [c["page_number"] for c in clauses] == [1, 2]
     assert len(unverified) == 1
     assert usage["input_tokens"] == 300  # all three chunks billed, all three reported
+
+
+def test_messages_create_never_sends_temperature(monkeypatch):
+    """Sonnet 5, like Opus 5 and every 4.6+ model, rejects a non-default
+    sampling parameter with a 400 — the API default is 1.0, so
+    temperature=0.0 fails on every call. This was shipped and reached a
+    review board green before anyone ran it against the real API.
+    """
+    good_clause = {
+        "clause_type": "renewal",
+        "text_quote": "renewal clause text",
+        "page_number": 1,
+        "confidence_score": 0.9,
+    }
+    fake_module = _FakeAnthropicModule([
+        _FakeResponse([good_clause], input_tokens=100, output_tokens=40),
+    ])
+    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+
+    lease_logic.extract_clauses(["page one text with renewal clause text in it"])
+
+    assert fake_module.last_client is not None
+    calls = fake_module.last_client.messages.calls
+    assert len(calls) == 1
+    assert "temperature" not in calls[0], (
+        "temperature must never be sent — claude-sonnet-5 rejects a "
+        "non-default value with a 400 on every call"
+    )
