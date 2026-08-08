@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -208,3 +209,78 @@ class TestSnippetWordBoundary(unittest.TestCase):
         self.assertTrue(idx == 0 or text[idx - 1].isspace())
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDedupeKeepsFindingsDistinct(unittest.TestCase):
+    """Three rules expect a forensic_report; merging on the type alone lost two.
+
+    Keying on `expected` only kept the first rule's reason and matched keyword
+    and then attributed them to every triggering document — so a witness
+    statement about CCTV was reported as having matched "knife", and two
+    entirely different case files produced byte-identical output.
+    """
+
+    CLS: ClassVar[list[dict[str, str]]] = [{"doc_id": "d1", "type": "fir"}]
+
+    def _forensic(self, docs):
+        return [
+            item
+            for item in check_missing_evidence(docs, self.CLS)
+            if item["expected"] == "forensic_report"
+        ]
+
+    def test_three_different_triggers_stay_three_findings(self):
+        found = self._forensic([
+            {"id": "d1", "text": "A knife was recovered."},
+            {"id": "d2", "text": "CCTV footage exists."},
+            {"id": "d3", "text": "Blood was found on the floor."},
+        ])
+        self.assertEqual(len(found), 3)
+        for item in found:
+            # each finding names only the document that actually triggered it
+            self.assertEqual(len(item["triggered_by"]), 1)
+            self.assertIn(item["matched"], {"knife", "cctv", "blood"})
+
+    def test_the_same_trigger_in_three_documents_stays_one_finding(self):
+        found = self._forensic([
+            {"id": "d1", "text": "A knife was recovered."},
+            {"id": "d2", "text": "The knife was bagged."},
+            {"id": "d3", "text": "Knife sent to store."},
+        ])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["triggered_by"], ["d1", "d2", "d3"])
+
+    def test_two_different_case_files_do_not_produce_identical_output(self):
+        a = self._forensic([
+            {"id": "d1", "text": "A knife was recovered."},
+            {"id": "d2", "text": "CCTV footage exists."},
+        ])
+        b = self._forensic([
+            {"id": "d1", "text": "A knife was recovered."},
+            {"id": "d2", "text": "The knife was bagged."},
+        ])
+        self.assertNotEqual(a, b)
+
+
+class TestUnparsedDatesAreReported(unittest.TestCase):
+    """A date-shaped string that fails to parse used to vanish without trace."""
+
+    def test_a_month_first_date_is_reported_not_dropped(self):
+        _timeline, issues = build_timeline(
+            [
+                {"id": "fir1", "text": "FIR filed on 2024-03-01."},
+                {"id": "w1", "text": "I saw the accused on 12/25/2024."},
+            ],
+            [{"id": "fir1", "type": "fir"}, {"id": "w1", "type": "witness_statement"}],
+        )
+        unparsed = [i for i in issues if i["type"] == "unparsed_date"]
+        self.assertEqual(len(unparsed), 1)
+        self.assertIn("12/25/2024", unparsed[0]["description"])
+        self.assertEqual(unparsed[0]["docs"], ["w1"])
+
+    def test_a_valid_day_first_date_raises_no_issue(self):
+        _timeline, issues = build_timeline(
+            [{"id": "fir1", "text": "FIR filed on 15/03/2024."}],
+            [{"id": "fir1", "type": "fir"}],
+        )
+        self.assertEqual([i for i in issues if i["type"] == "unparsed_date"], [])

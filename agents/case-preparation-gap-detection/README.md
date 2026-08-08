@@ -20,8 +20,10 @@ manually cross-referencing every document.
 1. **Classification** — tags each document by type (FIR, medical report,
    charge sheet, etc.) via keyword matching.
 2. **Timeline** — extracts dates from every document, merges them into one
-   chronology, and flags evidence documents dated before the FIR they
-   relate to.
+   chronology, and flags a **post-mortem report** dated before the FIR.
+   Only that type: a medical examination or a witness statement can
+   legitimately predate a late-filed FIR, so flagging those would be noise.
+   Numeric dates are read **day-first** (`DD/MM/YYYY`), per Indian practice.
 3. **Evidence completeness** — a bundled rule table (`data/evidence_rules.json`)
    checks whether facts mentioned in the case (a weapon, an injury, a death)
    have a corresponding supporting document; flags what's missing.
