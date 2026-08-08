@@ -640,3 +640,22 @@ def test_verify_and_check_agree_on_a_stale_usage_field(stub, capsys):
     verify_out = capsys.readouterr().out
     check_line = next(ln for ln in verify_out.splitlines() if "agents check" in ln)
     assert check_line.strip().startswith("FAIL"), f"verify disagreed with check: {check_line!r}"
+
+
+def test_an_empty_capability_falls_back_to_the_one_requested():
+    """`""` is an absence, not a claim, and must not beat the fallback.
+
+    Six shipped agents report `fail("", "internal", ...)` from their top-level
+    catch-all — the line the template shipped and everyone copied. Because the
+    key was present, `.get(key, default)` returned `""` and the caller lost the
+    one fact they were certain of: which capability they had called.
+    """
+    envelope = _envelope(ok=False, capability="", error={"type": "internal", "message": "boom"})
+    assert CallResult.decode(envelope, capability="grade_photos").capability == "grade_photos"
+
+
+def test_a_capability_the_agent_does_name_is_kept():
+    envelope = _envelope(
+        ok=False, capability="something_else", error={"type": "internal", "message": "x"}
+    )
+    assert CallResult.decode(envelope, capability="grade_photos").capability == "something_else"

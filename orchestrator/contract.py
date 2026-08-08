@@ -224,9 +224,15 @@ class CallResult:
         if ok and not isinstance(output, dict):
             raise ProtocolError("ok=true requires an output object")
 
+        # An empty capability is not a claim, it is an absence, and it must
+        # fall back the same way a missing key does. The template's catch-all
+        # reported `fail("", ...)` for years and every agent copied it, so on
+        # an unanticipated error the envelope said `""` — which, being
+        # present, beat the fallback and overwrote the one thing the caller
+        # already knew for certain: which capability they had asked for.
         return cls(
             ok=ok,
-            capability=str(payload.get("capability", capability)),
+            capability=str(payload.get("capability") or capability),
             output=output if ok else None,
             usage=Usage.from_wire(payload.get("usage")),
             error=error,
