@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # The key is optional on purpose: absent means grading is disabled, never
     # broken. See agents/photo_grader.py.
     anthropic_api_key: SecretStr | None = None
+    # ANTHROPIC_MODEL_VISION is configurable — but claude_client.py's
+    # messages_create sends temperature=0.0 unconditionally, which the
+    # current default (claude-sonnet-4-5) accepts and claude-sonnet-5,
+    # Opus 4.6+, and Fable 5 reject outright (400 on every call). See the
+    # comment on that parameter before pointing this at a newer model.
     anthropic_model_vision: str = "claude-sonnet-4-5"
 
     @property
