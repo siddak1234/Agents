@@ -10,7 +10,10 @@ orchestrator or script — not run and read directly by a person.
   renewal, financial, and maintenance clause found, each with its exact
   quote, its real physical page number, and a confidence score. Uses an LLM
   with a tool schema, so the response is always structured JSON, never free
-  text to parse.
+  text to parse. The confidence score is the model's own self-report — it is
+  not audited. Only the quote and page are independently verified against
+  the source pages; a high confidence score on an incorrect statement is
+  possible and not something this agent can detect.
 - **`calculate_deadline`** — given a lease end date and a notice period in
   days, returns the deadline date. Pure date arithmetic; callable on its
   own, with no dependency on `extract_clauses` running first.
@@ -78,9 +81,15 @@ hyphenation at a line break, typographic quotes and dashes, ligatures and soft
 hyphens. It does not fold anything that changes meaning — figures, negation
 and which party owes the obligation must still match exactly.
 
-**Known limitation.** Because whitespace is collapsed, a quote can match across
-a column gutter in a table — text that was never contiguous prose on the page.
-Treat a quote spanning what looks like tabular data as needing a human's eye.
+**Known limitation.** A gap of three or more spaces or tabs is treated as
+column alignment and blocks a match from bridging it — the false positive
+this used to allow (a quote spanning a table's header and figures as if they
+were one sentence) is closed. What is not closed: an ordinary PDF that
+happens to lay three or more spaces between two words in real running prose
+would also fail to match, because nothing at the text level tells that case
+apart from a table. If a genuine quote goes unexpectedly to
+`unverified_clauses`, a wide gap mid-sentence in the source page is the first
+thing to check.
 
 ## Page numbers when you split a document
 

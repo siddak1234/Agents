@@ -99,7 +99,13 @@ capabilities:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: How clearly the source text states this obligation, from 0.0 (uncertain) to 1.0 (explicit and unambiguous).
+                description: >-
+                  The model's own stated confidence that the source text
+                  clearly states this obligation, from 0.0 (uncertain) to 1.0
+                  (explicit and unambiguous) — self-reported, not
+                  independently audited. Verification (see `page_number`)
+                  only confirms the quote exists in the source; it says
+                  nothing about whether this number is calibrated.
         unverified_clauses:
           type: array
           description: >-
