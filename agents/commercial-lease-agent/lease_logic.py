@@ -25,6 +25,13 @@ VALID_CLAUSE_TYPES = ("renewal", "financial", "maintenance")
 
 # claude-sonnet-5 is the correct, current API model ID (verified against
 # platform.claude.com/docs). Override without touching code via LEASE_AGENT_MODEL.
+#
+# No `temperature` is passed to the API call below — deliberately. Sonnet 5,
+# like Opus 5 and every 4.6+ model, rejects a non-default sampling parameter
+# with a 400; the API default is 1.0, so `temperature=0.0` is non-default and
+# fails on every call. `photo_grader.py` and `planner.py` in this repo pass
+# `temperature=0.0` safely — they run claude-sonnet-4-5, which still accepts
+# it. Don't copy that line here without checking the target model first.
 DEFAULT_MODEL = "claude-sonnet-5"
 
 # Pages sent to the model per call. Keeps each call's output size bounded
@@ -232,7 +239,6 @@ def extract_clauses(
             response = client.messages.create(
                 model=model,
                 max_tokens=_MAX_OUTPUT_TOKENS_PER_CHUNK,
-                temperature=0.0,
                 tools=[tool],
                 tool_choice={"type": "tool", "name": "record_clauses"},
                 messages=[{"role": "user", "content": prompt}],
