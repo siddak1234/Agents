@@ -81,24 +81,50 @@ def _handle_describe(_payload: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-def _handle_extract_clauses(payload: dict[str, Any]) -> dict[str, Any]:
-    capability = "extract_clauses"
+def _extract_input_problem(payload: dict[str, Any]) -> str | None:  # noqa: PLR0911
+    """What is wrong with an `extract_clauses` payload, or None if nothing is.
+
+    One return per rejection, as `dispatch` does in the template: collapsing
+    them costs the specific message, which is the only part a caller can act on.
+    """
     lease_pages = payload.get("lease_pages")
     if not isinstance(lease_pages, list) or not lease_pages:
-        return fail(capability, "invalid_request", "'lease_pages' must be a non-empty array of strings")
+        return "'lease_pages' must be a non-empty array of strings"
     if not all(isinstance(p, str) for p in lease_pages):
-        return fail(capability, "invalid_request", "every item in 'lease_pages' must be a string")
+        return "every item in 'lease_pages' must be a string"
     if len(lease_pages) > lease_logic.MAX_LEASE_PAGES:
-        return fail(
-            capability,
-            "invalid_request",
+        return (
             f"'lease_pages' has {len(lease_pages)} pages, over the "
             f"{lease_logic.MAX_LEASE_PAGES}-page limit — each chunk of pages is one "
-            "billed model call, so split the document and call again per part",
+            "billed model call, so split the document and call again per part, "
+            "passing 'first_page_number' so page numbers stay real"
+        )
+    total_chars = sum(len(p) for p in lease_pages)
+    if total_chars > lease_logic.MAX_LEASE_CHARS:
+        return (
+            f"'lease_pages' totals {total_chars} characters, over the "
+            f"{lease_logic.MAX_LEASE_CHARS} limit — that is what a request costs, "
+            "so split the document and call again per part"
         )
 
+    first_page = payload.get("first_page_number", 1)
+    if not isinstance(first_page, int) or isinstance(first_page, bool):
+        return "'first_page_number' must be an integer"
+    if first_page < 1:
+        return "'first_page_number' must be 1 or greater"
+    return None
+
+
+def _handle_extract_clauses(payload: dict[str, Any]) -> dict[str, Any]:
+    capability = "extract_clauses"
+    if problem := _extract_input_problem(payload):
+        return fail(capability, "invalid_request", problem)
+
+    lease_pages = payload["lease_pages"]
+    first_page_number = payload.get("first_page_number", 1)
+
     try:
-        clauses, usage = lease_logic.extract_clauses(lease_pages)
+        clauses, unverified, usage = lease_logic.extract_clauses(lease_pages, first_page_number)
     except lease_logic.LeaseLogicError as exc:
         etype, retryable = _EXTRACT_ERROR_MAP.get(type(exc), ("internal", False))
         # ModelCallError decides its own retryability: a rejected key and a
@@ -112,7 +138,7 @@ def _handle_extract_clauses(payload: dict[str, Any]) -> dict[str, Any]:
             usage=getattr(exc, "usage", None),
         )
 
-    return ok(capability, {"clauses": clauses}, usage=usage)
+    return ok(capability, {"clauses": clauses, "unverified_clauses": unverified}, usage=usage)
 
 
 def _handle_calculate_deadline(payload: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +168,7 @@ def _handle_calculate_deadline(payload: dict[str, Any]) -> dict[str, Any]:
 _EXTRACT_ERROR_MAP: dict[type, tuple[str, bool]] = {
     lease_logic.MissingCredentialError: ("unavailable", False),
     lease_logic.MissingDependencyError: ("unavailable", False),
+    lease_logic.ModelRequestError: ("invalid_request", False),
     lease_logic.ModelCallError: ("unavailable", False),
 }
 

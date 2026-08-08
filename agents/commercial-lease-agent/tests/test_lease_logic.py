@@ -38,6 +38,30 @@ def test_locate_page_finds_exact_quote():
     assert lease_logic._locate_page("renewal clause", pages) == 2
 
 
+def test_locate_page_prefers_the_page_the_model_claimed():
+    """Leases repeat clauses in a summary sheet; first-match would cite that."""
+    pages = ["SUMMARY: Base Rent $42.00 per foot.", "definitions", "Base Rent $42.00 per foot."]
+    assert lease_logic._locate_page("Base Rent $42.00 per foot.", pages, claimed=3) == 3
+    # A claim that does not check out falls back to searching.
+    assert lease_logic._locate_page("Base Rent $42.00 per foot.", pages, claimed=2) == 1
+
+
+def test_normalise_folds_what_pdf_extraction_differs_on():
+    # ruff: noqa: RUF001 — the ambiguous characters are the subject of the test
+    page = ("Landlord shall main-\ntain the “Premises” at Landlord’s expense — "
+            "including the ﬁrst full Lease Year.")
+    quote = 'Landlord shall maintain the "Premises" at Landlord\'s expense - including the first full Lease Year.'
+    assert lease_logic._locate_page(quote, [page]) == 1
+
+
+def test_normalise_still_rejects_what_actually_differs():
+    page = "Landlord shall repair the roof at a cost of $42.00."
+    for wrong in ("Tenant shall repair the roof at a cost of $42.00.",
+                  "Landlord shall not repair the roof at a cost of $42.00.",
+                  "Landlord shall repair the roof at a cost of $52.00."):
+        assert lease_logic._locate_page(wrong, [page]) is None, wrong
+
+
 def test_locate_page_returns_none_when_quote_is_on_no_page():
     pages = ["first page", "second page"]
     assert lease_logic._locate_page("not present anywhere", pages) is None
@@ -63,10 +87,9 @@ def test_clean_clause_recomputes_page_and_clamps_confidence():
     assert cleaned["confidence_score"] == 1.0
 
 
-def test_clean_clause_drops_a_quote_found_on_no_page():
-    # The promise in agent.yaml is a verbatim quote and the page it came from.
-    # A paraphrase honours neither, and the model's claimed page is not
-    # evidence — so it must not come back looking like a checked citation.
+def test_clean_clause_marks_an_unlocatable_quote_unverified_not_gone():
+    # A paraphrase must not look like a checked citation — but deleting it made
+    # "no such clause" and "quote not verifiable" the same answer.
     pages = ["Tenant shall pay Base Rent of $10.00 per rentable square foot."]
     raw = {
         "clause_type": "financial",
@@ -74,7 +97,17 @@ def test_clean_clause_drops_a_quote_found_on_no_page():
         "page_number": 2,
         "confidence_score": 0.95,
     }
-    assert lease_logic._clean_clause(raw, pages) is None
+    out = lease_logic._clean_clause(raw, pages)
+    assert out["page_number"] is None
+    assert out["claimed_page_number"] == 2
+    assert out["text_quote"] == raw["text_quote"]
+
+
+def test_clean_clause_offsets_the_page_for_a_split_document():
+    pages = ["Base Rent is $42.00 per foot."]
+    raw = {"clause_type": "financial", "text_quote": "Base Rent is $42.00 per foot.",
+           "page_number": 1, "confidence_score": 0.9}
+    assert lease_logic._clean_clause(raw, pages, first_page_number=1001)["page_number"] == 1001
 
 
 def test_chunk_ranges_splits_long_document():
@@ -212,7 +245,7 @@ def test_extract_clauses_success_across_two_chunks(monkeypatch):
     monkeypatch.setenv("LEASE_AGENT_CHUNK_SIZE", "1")
 
     pages = ["page one text with renewal clause text in it", "page two text"]
-    clauses, usage = lease_logic.extract_clauses(pages)
+    clauses, _unverified, usage = lease_logic.extract_clauses(pages)
 
     assert len(clauses) == 1
     assert clauses[0]["page_number"] == 1
@@ -306,7 +339,7 @@ def test_extract_clauses_marks_a_rate_limit_retryable(monkeypatch):
         raise AssertionError("expected ModelCallError")
 
 
-def test_extract_clauses_drops_an_invented_quote_but_keeps_a_real_one(monkeypatch):
+def test_extract_clauses_reports_an_invented_quote_without_losing_a_real_one(monkeypatch):
     real = {
         "clause_type": "renewal",
         "text_quote": "Tenant may renew for one additional term of five years.",
@@ -326,10 +359,13 @@ def test_extract_clauses_drops_an_invented_quote_but_keeps_a_real_one(monkeypatc
     )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
 
-    clauses, _ = lease_logic.extract_clauses(
+    clauses, unverified, _ = lease_logic.extract_clauses(
         ["Tenant may renew for one additional term of five years."]
     )
     assert [c["text_quote"] for c in clauses] == [real["text_quote"]]
+    # The invented one is reported, not silently gone.
+    assert [c["text_quote"] for c in unverified] == [invented["text_quote"]]
+    assert unverified[0]["page_number"] is None
 
 
 def test_tool_schema_matches_the_golden_fixture():
@@ -337,3 +373,35 @@ def test_tool_schema_matches_the_golden_fixture():
     # it is for realty-lead-gen and investment-due-diligence.
     golden = json.loads((Path(__file__).parent / "golden" / "record_clauses_tool_schema.json").read_text())
     assert lease_logic._build_tool_schema() == golden
+
+
+def test_one_chunks_miss_does_not_destroy_the_other_chunks(monkeypatch):
+    """The blocker this change exists for.
+
+    A quote that failed to match used to raise, discarding every clause already
+    extracted and verified from earlier chunks — twelve good chunks of a
+    250-page lease binned because of the thirteenth, fully billed, with
+    retryable:false telling the caller to give up for good.
+    """
+    def cl(t, q, p):
+        return {"clause_type": t, "text_quote": q, "page_number": p, "confidence_score": 0.9}
+
+    pages = [
+        "Tenant may renew for five years.",
+        "Base Rent is $42.00 per foot.",
+        "Landlord maintains all structural elements.",
+    ]
+    monkeypatch.setitem(sys.modules, "anthropic", _FakeAnthropicModule([
+        _FakeResponse([cl("renewal", pages[0], 1)]),
+        _FakeResponse([cl("financial", pages[1], 2)]),
+        # The model paraphrases on the last chunk — nothing locatable.
+        _FakeResponse([cl("maintenance", "Landlord looks after the structure.", 3)]),
+    ]))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing-only")
+    monkeypatch.setenv("LEASE_AGENT_CHUNK_SIZE", "1")
+
+    clauses, unverified, usage = lease_logic.extract_clauses(pages)
+
+    assert [c["page_number"] for c in clauses] == [1, 2]
+    assert len(unverified) == 1
+    assert usage["input_tokens"] == 300  # all three chunks billed, all three reported

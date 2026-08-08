@@ -155,7 +155,26 @@ def test_extract_clauses_success_envelope(monkeypatch):
         "clause_type": "renewal", "text_quote": quote,
         "page_number": 1, "confidence_score": 0.93,
     }]
+    assert envelope["output"]["unverified_clauses"] == []
     assert envelope["usage"] == {
         "input_tokens": 120, "output_tokens": 45, "model": "claude-sonnet-5",
     }
     assert envelope["error"] is None
+
+
+def test_extract_clauses_rejects_a_document_over_the_character_cap():
+    """The page cap bounds neither calls nor tokens; the character cap is what
+    actually corresponds to the bill."""
+    envelope = _call("extract_clauses", {"lease_pages": ["x" * 500_000] * 9})
+    assert envelope["ok"] is False
+    assert envelope["error"]["type"] == "invalid_request"
+    assert "characters" in envelope["error"]["message"]
+
+
+def test_extract_clauses_rejects_a_bad_first_page_number():
+    for bad in (0, -3, "1", 1.5, True):
+        envelope = _call(
+            "extract_clauses", {"lease_pages": ["page"], "first_page_number": bad}
+        )
+        assert envelope["ok"] is False, bad
+        assert envelope["error"]["type"] == "invalid_request", bad
