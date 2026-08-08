@@ -1,20 +1,27 @@
 """Per-request time budget derived from agentcall `deadline_ms`.
 
-Sequential outbound calls share one clock: each
-call takes a slice of whatever time is left so a capability with 2-3
-searches cannot schedule 15s x N against a 30s deadline.
+Sequential outbound calls share one clock: each call takes a slice of
+whatever time is left, so a capability making several cannot schedule more
+wall-clock than its deadline allows.
+
+The numbers below are sized for what this agent actually does now: one
+Claude call that may run several web searches before it answers. They were
+previously sized for single Tavily searches -- a 12s per-call ceiling
+against a 30s deadline -- which silently capped every capability at 12s and
+would have timed out every real call.
 """
 
 from __future__ import annotations
 
 import time
 
-# Matches the README example and keeps multi-call capabilities inside a
-# typical orchestrator kill window when the caller omits deadline_ms.
-DEFAULT_DEADLINE_MS = 30_000
-# Hard ceiling per individual HTTP call — never let one hung upstream
-# consume the whole budget even when the deadline is generous.
-MAX_CALL_TIMEOUT_S = 12.0
+# A research call with web search is tens of seconds, not hundreds of
+# milliseconds. Matches the README example.
+DEFAULT_DEADLINE_MS = 180_000
+# Hard ceiling per individual call — never let one hung upstream consume
+# the whole budget even when the deadline is generous. Above the time a
+# search-heavy turn needs, or the ceiling becomes the timeout.
+MAX_CALL_TIMEOUT_S = 150.0
 MIN_CALL_TIMEOUT_S = 0.5
 
 

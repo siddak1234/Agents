@@ -84,7 +84,7 @@ echo '{
     "area_sqft": 1650
   },
   "request_id": "demo-1",
-  "deadline_ms": 30000
+  "deadline_ms": 180000
 }' | python3 agent_main.py
 ```
 
@@ -126,7 +126,7 @@ failure mode that removal avoids.
 - **Timeouts are budgeted from `deadline_ms`.** `budget.py` splits the
   remaining wall-clock across the outbound calls a capability still has
   to make, so a multi-call capability cannot overrun the deadline. Omit `deadline_ms` and the agent assumes
-  30s.
+  180s.
 - **One vendor, via the official SDK.** `clients.py` uses the `anthropic`
   package; `command:` runs under `uv` so the dependency is pinned by
   `uv.lock`. This matches `realty-lead-gen` and `operations-maintenance-agent`,

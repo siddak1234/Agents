@@ -31,6 +31,7 @@ import agent_main
 import analysis
 import clients
 import recommendation
+from budget import DeadlineBudget
 from recommendation import RECOMMENDATION_TOOL, RECOMMENDATION_TOOL_NAME
 
 FAKE_KEY = {"ANTHROPIC_API_KEY": "stub-not-a-real-key"}
@@ -404,6 +405,37 @@ class TestEnvelopeWithoutCredentials(unittest.TestCase):
         self.assertEqual(
             envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "model": None}
         )
+
+
+class TestTimeoutIsWorkable(unittest.TestCase):
+    """The budget must leave room for a search-heavy model call.
+
+    agent_main builds a DeadlineBudget for every capability except
+    describe, so whatever `for_call` returns *is* the timeout `research`
+    gets -- the 90s default never applies on a real call. When these
+    constants were sized for single Tavily searches, that was 12s, which no
+    web-search turn finishes inside: every real call would have timed out,
+    and no test noticed because they all stub `research`.
+    """
+
+    #: Below this, a Claude turn that runs several searches cannot finish.
+    FLOOR_S = 60.0
+
+    def test_default_deadline_leaves_a_usable_timeout(self):
+        budget = DeadlineBudget.from_deadline_ms(None)
+        self.assertGreaterEqual(budget.for_call(1), self.FLOOR_S)
+
+    def test_each_capability_receives_that_timeout(self):
+        seen, fake = _capture({"property_type": "Apartment", "location": "Pune"})
+        with mock.patch.object(analysis, "research", fake):
+            analysis.build_property_profile(
+                property_url=None,
+                address="12 MG Road, Pune",
+                asking_price_inr=None,
+                area_sqft=None,
+                budget=DeadlineBudget.from_deadline_ms(None),
+            )
+        self.assertGreaterEqual(seen["timeout"], self.FLOOR_S)
 
 
 class TestToolSchemaGolden(unittest.TestCase):

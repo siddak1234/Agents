@@ -83,7 +83,7 @@ class TestEvidenceSizeBound(unittest.TestCase):
 class TestDeadlineBudget(unittest.TestCase):
     def test_default_when_deadline_omitted(self):
         budget = DeadlineBudget.from_deadline_ms(None)
-        self.assertAlmostEqual(budget.remaining(), 30.0, delta=0.5)
+        self.assertAlmostEqual(budget.remaining(), 180.0, delta=0.5)
 
     def test_invalid_deadline_rejected(self):
         with self.assertRaises(ValueError):
@@ -98,9 +98,10 @@ class TestDeadlineBudget(unittest.TestCase):
         real_mono = budget_mod.time.monotonic
         budget_mod.time.monotonic = lambda: now
         try:
+            # 30s across 3 calls: each gets a share, none hits the ceiling.
             self.assertAlmostEqual(budget.for_call(3), 9.5, places=2)
-            self.assertAlmostEqual(budget.for_call(2), 12.0, places=2)  # capped
-            self.assertAlmostEqual(budget.for_call(1), 12.0, places=2)
+            self.assertAlmostEqual(budget.for_call(2), 14.25, places=2)
+            self.assertAlmostEqual(budget.for_call(1), 28.5, places=2)
         finally:
             budget_mod.time.monotonic = real_mono
 
