@@ -45,6 +45,21 @@ def _usage_count(raw: dict[str, Any], field: str) -> int:
     return value
 
 
+# Fields `usage` used to carry and no longer does. Decoding stays lenient —
+# an orchestrator should not refuse to run an agent that is merely behind —
+# but silence is how a stale emitter reached review green once already: it
+# reports `model: null`, which reads as "called no model" rather than "did
+# not migrate". So the field is tolerated at runtime and named at the gate.
+REMOVED_USAGE_FIELDS: tuple[str, ...] = ("cost_micros",)
+
+
+def stale_usage_fields(raw: Any) -> tuple[str, ...]:
+    """Removed `usage` fields an agent is still emitting, in declared order."""
+    if not isinstance(raw, dict):
+        return ()
+    return tuple(f for f in REMOVED_USAGE_FIELDS if f in raw)
+
+
 def _usage_model(raw: dict[str, Any]) -> str | None:
     """The model an agent called, or None when it called none.
 
@@ -168,6 +183,8 @@ class CallResult:
     output: dict[str, Any] | None = None
     usage: Usage = field(default_factory=Usage)
     error: CallError | None = None
+    # Contract violations mild enough to run with, loud enough to fail a gate.
+    stale_usage: tuple[str, ...] = ()
 
     @classmethod
     def failure(cls, capability: str, error: CallError) -> CallResult:
@@ -213,6 +230,7 @@ class CallResult:
             output=output if ok else None,
             usage=Usage.from_wire(payload.get("usage")),
             error=error,
+            stale_usage=stale_usage_fields(payload.get("usage")),
         )
 
     def to_wire(self) -> dict[str, Any]:

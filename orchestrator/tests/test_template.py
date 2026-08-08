@@ -92,6 +92,39 @@ def test_runs_without_the_orchestrator(template):
     assert json.loads(proc.stdout)["ok"] is True
 
 
+def test_an_unanticipated_failure_still_names_the_capability():
+    """`fail("", ...)` was copied out of here into every agent in the repo.
+
+    A caller driving several capabilities cannot tell which one this envelope
+    answers, and the empty string reads as "no capability was requested" —
+    which is not what happened. Reproduced against the template rather than
+    any one agent, because the template is where it came from.
+    """
+    request = json.dumps({"protocol": PROTOCOL, "capability": "greet", "input": {"name": "Dak"}})
+    proc = subprocess.run(
+        [sys.executable, "-c", CRASHING_TEMPLATE],
+        cwd=TEMPLATE,
+        input=request,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    envelope = json.loads(proc.stdout)
+    assert envelope["ok"] is False
+    assert envelope["error"]["type"] == "internal"
+    assert envelope["capability"] == "greet"
+
+
+# Import agent_main, break dispatch, and run main() — the only way to reach
+# the top-level catch-all, which nothing else can trigger by design.
+CRASHING_TEMPLATE = (
+    "import agent_main\n"
+    "agent_main.dispatch = lambda raw: (_ for _ in ()).throw(RuntimeError('boom'))\n"
+    "raise SystemExit(agent_main.main())\n"
+)
+
+
 def test_template_is_not_registered():
     """Keeps `agents list` honest: a template is not an agent."""
     assert "_template" not in load_registry().agents

@@ -83,6 +83,13 @@ one and `null` when it did not; a non-string is a protocol error. All five
 agents in this repository were migrated in the commit that changed this
 file.
 
+`agents check` fails an agent that still emits a removed field, naming it.
+Decoding stays lenient — an orchestrator should not refuse to run an agent
+that is merely behind — but the gate does not, because "did not migrate" and
+"called no model" are different claims that `model: null` cannot tell apart.
+A branch emitting `cost_micros` passed every gate green once before this
+existed.
+
 | `error.type` | Meaning | `retryable` |
 |---|---|---|
 | `invalid_request` | Unknown capability, malformed input, wrong protocol. | `false` |
