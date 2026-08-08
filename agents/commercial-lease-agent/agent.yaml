@@ -4,11 +4,12 @@ description: >-
   Extracts renewal, financial, and maintenance clauses from commercial lease
   documents into structured JSON, with the exact source quote, the physical
   page number, and a confidence score for each — replacing an hours-long
-  manual read-through with a single call. Also calculates a notice deadline
-  from a lease end date and a notice period, on its own or as a follow-up to
-  extraction. Called by an orchestrator or script, not directly by a person;
-  it does not read PDF files itself, render output for a human, or store any
-  lease it has seen.
+  manual read-through with a single call. Separately, calculates a notice
+  deadline from a lease end date and a notice period the caller already has —
+  extraction returns quotes, not dates, so the two do not chain on their own.
+  Called by an orchestrator or script, not directly by a person; it does not
+  read PDF files itself, render output for a human, or store any lease it has
+  seen.
 
 runtime:
   type: subprocess

@@ -15,6 +15,13 @@ orchestrator or script — not run and read directly by a person.
   days, returns the deadline date. Pure date arithmetic; callable on its
   own, with no dependency on `extract_clauses` running first.
 
+**The two do not chain by themselves.** `extract_clauses` returns quotes, and
+`calculate_deadline` wants a date and an integer, so a caller wanting a
+renewal deadline has to read the notice period out of a renewal clause's
+`text_quote` and find the lease end date elsewhere — the term clause is not
+one of the three types extracted. Closing that gap is a capability change, not
+a configuration one.
+
 ## What it will not do
 
 - It does not read PDF or Word files itself — the caller splits the
