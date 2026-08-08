@@ -24,6 +24,7 @@ import realty_lead_gen.agents.claude_client as claude_client_module
 import realty_lead_gen.agents.photo_grader as photo_grader_module
 import realty_lead_gen.config as config_module
 from realty_lead_gen import agentcall
+from realty_lead_gen.utils.retry import TransientError
 
 
 def _request(**overrides: Any) -> str:
@@ -261,3 +262,79 @@ class TestMain:
         monkeypatch.setattr(sys, "stdout", out)
         agentcall.main()
         assert sys.stdout is out
+
+
+@pytest.mark.unit
+class TestTransientFailuresStayRetryable:
+    """`claude_client` classifies transient vs permanent; the adapter dropped it.
+
+    Every failure became `internal` / `retryable: false`, so a caller reading
+    the flag off docs/INTERN_BRIEF.md's table was told a retry could not help
+    after a rate limit or a 5xx — the one case where it can.
+    """
+
+    def test_a_transient_failure_is_unavailable_and_retryable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_grading(monkeypatch, error=TransientError("rate limited"))
+        envelope = agentcall._dispatch(
+            _request(capability="grade_photos", input={"photo_urls": ["https://x/1.jpg"]})
+        )
+        assert envelope["ok"] is False
+        assert envelope["error"]["type"] == "unavailable"
+        assert envelope["error"]["retryable"] is True
+
+    def test_a_transient_timeout_is_reported_as_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        exc = TransientError("request timed out")
+        exc.__cause__ = TimeoutError("deadline")
+        _patch_grading(monkeypatch, error=exc)
+        envelope = agentcall._dispatch(
+            _request(capability="grade_photos", input={"photo_urls": ["https://x/1.jpg"]})
+        )
+        assert envelope["error"]["type"] == "timeout"
+        assert envelope["error"]["retryable"] is True
+
+    def test_a_permanent_failure_is_still_internal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_grading(monkeypatch, error=RuntimeError("boom"))
+        envelope = agentcall._dispatch(
+            _request(capability="grade_photos", input={"photo_urls": ["https://x/1.jpg"]})
+        )
+        assert envelope["error"]["type"] == "internal"
+        assert envelope["error"]["retryable"] is False
+
+
+@pytest.mark.unit
+class TestNestedRepairCostsAreCents:
+    """One envelope carried `rehab_total_low_cents` beside a float `cost_low_usd`."""
+
+    def test_repair_items_are_converted_to_integer_cents(self) -> None:
+        out = photo_grader_module._systems_in_cents(
+            [
+                {
+                    "system": "roof",
+                    "repair_items": [
+                        {
+                            "item": "shingles",
+                            "scope": "replace",
+                            "cost_low_usd": 2500.75,
+                            "cost_high_usd": 4000.0,
+                            "confidence": 0.8,
+                            "evidence_photo_ids": [0],
+                        },
+                    ],
+                }
+            ]
+        )
+        item = out[0]["repair_items"][0]
+        assert item["cost_low_cents"] == 250075
+        assert item["cost_high_cents"] == 400000
+        assert "cost_low_usd" not in item
+        assert "cost_high_usd" not in item
+        assert item["item"] == "shingles"  # everything else survives
+
+    def test_a_system_with_no_repair_items_is_unharmed(self) -> None:
+        assert photo_grader_module._systems_in_cents([{"system": "roof"}]) == [
+            {"system": "roof", "repair_items": []}
+        ]

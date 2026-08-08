@@ -232,7 +232,7 @@ class PhotoGrader:
             overall_confidence=float(payload["overall_confidence"]),
             rehab_total_low_cents=int(float(payload["rehab_total_low_usd"]) * 100),
             rehab_total_high_cents=int(float(payload["rehab_total_high_usd"]) * 100),
-            systems=payload["systems"],
+            systems=_systems_in_cents(payload["systems"]),
             red_flags=payload["red_flags"],
             notes_for_reviewer=payload.get("notes_for_reviewer"),
             usage=usage,
@@ -246,6 +246,32 @@ class PhotoGrader:
             "tool": _PHOTO_GRADER_TOOL,
             "prompt_version": PROMPT_VERSION,
         }
+
+
+def _systems_in_cents(systems: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert per-repair costs to integer cents, like every other money field.
+
+    The model is asked for `cost_low_usd`/`cost_high_usd` because dollars are
+    what it reasons in, and the two totals were converted while these were
+    forwarded verbatim — so one envelope carried `rehab_total_low_cents` beside
+    a float `cost_low_usd`, under a `_usd` name `agent.yaml` never declared.
+    "Money is integer cents. Never a float on the wire" is stated in the
+    manifest, the README and this agent's CLAUDE.md; the nested costs were the
+    one place it was not true.
+    """
+    converted = []
+    for system in systems:
+        entry = dict(system)
+        entry["repair_items"] = [
+            {
+                **{k: v for k, v in item.items() if k not in ("cost_low_usd", "cost_high_usd")},
+                "cost_low_cents": int(float(item["cost_low_usd"]) * 100),
+                "cost_high_cents": int(float(item["cost_high_usd"]) * 100),
+            }
+            for item in system.get("repair_items", [])
+        ]
+        converted.append(entry)
+    return converted
 
 
 def prompt_version() -> str:

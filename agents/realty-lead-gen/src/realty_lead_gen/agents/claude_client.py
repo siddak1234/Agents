@@ -2,13 +2,16 @@
 
 Centralizes:
     * client lifecycle (single async client per process)
-    * cost accounting (input/output tokens -> USD micros), reported in the
-      envelope's `usage` — recorded, never enforced: nothing here caps spend
+    * token accounting — input/output counts and the model that produced them,
+      reported in the envelope's `usage`
     * unified error mapping (transient vs permanent)
     * structured logging
 
-The concrete rate table lives here so we do not scatter magic numbers.
-Update when Anthropic publishes new pricing.
+No prices. `usage` reports what this agent observed, never money: a price is a
+vendor fact that changes without notice, so cost is derived once wherever it is
+needed rather than copied into every agent. See docs/AGENT_PROTOCOL.md — the
+rate table this file used to hold was deleted with `cost_micros`, and this
+paragraph outlived it by telling the next maintainer to bring it back.
 """
 
 from __future__ import annotations
