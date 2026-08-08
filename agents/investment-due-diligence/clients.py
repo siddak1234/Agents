@@ -126,18 +126,29 @@ def tavily_search(query: str, *, max_results: int = 5, timeout: float = 15) -> l
 
     body = json.dumps(
         {
-            "api_key": api_key,
             "query": query,
             "search_depth": "basic",
             "max_results": max_results,
             "include_answer": False,
         }
     ).encode("utf-8")
+    # Bearer header, not an `api_key` field in the body. Tavily's current API
+    # reference documents header auth only, and the official client
+    # (tavily-ai/tavily-python) sends `Authorization: Bearer <key>` and never
+    # puts the key in the payload. Body auth is a legacy form: undocumented
+    # today, and if it stops being honoured every search here returns 401 ->
+    # `unavailable`, which reads like graceful degradation while meaning the
+    # agent never works at all. Keeping the key out of the body also keeps it
+    # out of anything that logs request payloads.
     request = urllib.request.Request(
         TAVILY_URL,
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": USER_AGENT,
+        },
     )
     data = _call(request, timeout=timeout, service="Tavily search")
     # Counted only once the call came back 200: a rejected key, a 429 or a

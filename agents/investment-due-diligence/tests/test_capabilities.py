@@ -470,6 +470,29 @@ class TestEnvelopeAndSpend(unittest.TestCase):
             "cost_micros": groq_cost_micros(259, 88),
         })
 
+    def test_tavily_request_authenticates_by_header_not_body(self):
+        """Tavily documents Bearer auth; the key must never be in the payload."""
+        seen = {}
+
+        class _Recording(_Transport):
+            def __call__(self, request, timeout=None):
+                seen["auth"] = request.headers.get("Authorization")
+                seen["body"] = json.loads(request.data.decode("utf-8"))
+                return super().__call__(request, timeout)
+
+        _dispatch(
+            "location_infrastructure_analysis",
+            {"location": "Whitefield, Bangalore"},
+            _Recording([
+                ("nominatim", []),
+                ("infrastructure", _results(_hit("T", "Metro announced"))),
+                ("connectivity", _results(_hit("A", "schools nearby"))),
+            ]),
+        )
+        self.assertEqual(seen["auth"], f"Bearer {FAKE_KEYS['TAVILY_API_KEY']}")
+        self.assertNotIn("api_key", seen["body"])
+        self.assertIn("query", seen["body"])
+
     def test_groq_request_carries_the_forced_tool_choice(self):
         sent = {}
         payload = _groq_payload(
