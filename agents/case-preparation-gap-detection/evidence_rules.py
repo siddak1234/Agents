@@ -43,19 +43,33 @@ def check_missing_evidence(
 
 
 def _dedupe(missing: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One entry per expected evidence type, with every triggering document
-    listed together — three docs mentioning a knife should produce one
-    recommendation, not three identical ones."""
-    by_expected: dict[str, dict[str, Any]] = {}
+    """One entry per distinct finding, with every triggering document listed
+    together — three docs mentioning a knife should produce one
+    recommendation, not three identical ones.
+
+    Keyed on the reason as well as the expected type. Keying on the type alone
+    merged findings that are not the same finding: three rules in
+    data/evidence_rules.json expect a `forensic_report` (weapon recovery,
+    video/camera, physical trace), so a case with a knife, CCTV and a
+    bloodstain collapsed into one entry that kept the first rule's `reason` and
+    `matched` and then attributed them to all three documents — asserting that
+    a witness statement about CCTV had matched "knife". Two entirely different
+    case files produced byte-identical output.
+    """
+    by_finding: dict[tuple[str, str], dict[str, Any]] = {}
     for item in missing:
-        expected = item["expected"]
-        if expected not in by_expected:
-            by_expected[expected] = {
-                "expected": expected,
+        key = (item["expected"], item["reason"])
+        if key not in by_finding:
+            by_finding[key] = {
+                "expected": item["expected"],
                 "reason": item["reason"],
                 "triggered_by": [item["triggered_by"]],
                 "matched": item["matched"],
             }
         else:
-            by_expected[expected]["triggered_by"].append(item["triggered_by"])
-    return list(by_expected.values())
+            by_finding[key]["triggered_by"].append(item["triggered_by"])
+    # One document can satisfy several keywords of the same rule, which listed
+    # it more than once against a docstring promising each triggering document.
+    for entry in by_finding.values():
+        entry["triggered_by"] = list(dict.fromkeys(entry["triggered_by"]))
+    return list(by_finding.values())

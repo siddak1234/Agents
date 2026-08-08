@@ -129,7 +129,45 @@ def build_timeline(
 
     timeline.sort(key=lambda entry: entry["date"])
     issues = _find_issues(dates_by_doc, type_by_id, documents_by_id)
+    issues.extend(_unparsed_date_issues(documents_by_id))
     return timeline, issues
+
+
+def _unparsed_date_issues(documents_by_id: dict[str, str]) -> list[dict[str, Any]]:
+    """Report date-shaped strings that are not dates, rather than dropping them.
+
+    Numeric dates are read day-first, so `12/25/2024` has month 25 and fails.
+    Skipping it silently removed the event from the chronology with no signal
+    at all — a witness statement's only date could vanish and the readiness
+    score would still read 100. The date is genuinely ambiguous or wrong; the
+    caller is the one who can tell which, and they need to be told it exists.
+    """
+    issues: list[dict[str, Any]] = []
+    for doc_id, text in documents_by_id.items():
+        literals = _unparsed_date_literals(text)
+        if literals:
+            issues.append({
+                "type": "unparsed_date",
+                "description": (
+                    f"Date-shaped text that could not be read as a real date: "
+                    f"{', '.join(literals)}. Numeric dates are read day-first "
+                    f"(DD/MM/YYYY); check whether these are month-first."
+                ),
+                "docs": [doc_id],
+            })
+    return issues
+
+
+def _unparsed_date_literals(text: str) -> list[str]:
+    """Strings matching a date pattern that `strptime` then rejects."""
+    bad: list[str] = []
+    for pattern, fmt in _DATE_PATTERNS:
+        for match in re.finditer(pattern, text):
+            try:
+                datetime.strptime(match.group(0), fmt)  # noqa: DTZ007 — calendar dates have no timezone
+            except ValueError:
+                bad.append(match.group(0))
+    return list(dict.fromkeys(bad))
 
 
 def _find_issues(
@@ -152,9 +190,10 @@ def _find_issues(
         return [{
             "type": "missing_date",
             "description": (
-                "An FIR document is present but no clearly labeled filing "
-                "date ('filed on YYYY-MM-DD') could be found, so timeline "
-                "consistency could not be checked."
+                "An FIR document is present but no readable filing date "
+                "could be found after 'filed on' (YYYY-MM-DD, DD/MM/YYYY, "
+                "DD-MM-YYYY or '15 March 2024'), so timeline consistency "
+                "could not be checked. Numeric dates are read day-first."
             ),
             "docs": fir_ids,
         }]
