@@ -94,16 +94,46 @@ capabilities:
       properties:
         overall_condition:
           type: string
-          description: UAD grade, C1 through C6.
+          enum: [C1, C2, C3, C4, C5, C6, NEEDS_HUMAN_REVIEW]
+          description: >-
+            UAD grade C1 through C6, or NEEDS_HUMAN_REVIEW when
+            overall_confidence is below 0.6 — the grader declining to grade
+            rather than a seventh point on the scale. Route it to a person.
         overall_confidence: { type: number, minimum: 0, maximum: 1 }
         # Money is integer cents everywhere in this agent — see CLAUDE.md.
         rehab_total_low_cents: { type: integer }
         rehab_total_high_cents: { type: integer }
         systems:
           type: array
-          items: { type: object }
+          items:
+            type: object
+            properties:
+              system: { type: string }
+              condition_grade:
+                type: string
+                enum: [C1, C2, C3, C4, C5, C6, NOT_VISIBLE]
+              observations: { type: string }
+              repair_items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    item: { type: string }
+                    scope: { type: string }
+                    # Cents here too. The model is asked for dollars because
+                    # that is what it reasons in; the conversion happens before
+                    # anything reaches the wire.
+                    cost_low_cents: { type: integer }
+                    cost_high_cents: { type: integer }
+                    confidence: { type: number, minimum: 0, maximum: 1 }
+                    evidence_photo_ids: { type: array, items: { type: integer } }
         red_flags:
           type: array
-          items: { type: string }
+          description: >-
+            Empty, or the flags that apply. The literal ["none"] also means no
+            flags — treat it as empty rather than as a flag named "none".
+          items:
+            type: string
+            enum: [foundation, roof, water_damage, mold, fire_damage, structural, none]
         notes_for_reviewer: { type: [string, "null"] }
         model: { type: string }

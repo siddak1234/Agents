@@ -49,7 +49,7 @@ folder, which is also what CI does.
 | Capability | In | Out |
 |---|---|---|
 | `describe` | `{}` | name, protocol, capability list |
-| `grade_photos` | `photo_urls` (list of URLs), optional `market_hint` | UAD condition grade, confidence, rehab range in integer cents, per-system findings, red flags |
+| `grade_photos` | `photo_urls` (list of URLs), optional `market_hint` | UAD condition grade (or `NEEDS_HUMAN_REVIEW`), confidence, rehab range in integer cents, per-system findings with per-repair costs in cents, red flags |
 
 Schemas in full in [`agent.yaml`](./agent.yaml). Money is integer cents —
 never floats on the wire.

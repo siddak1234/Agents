@@ -119,6 +119,7 @@ def _grade_photos(payload: dict[str, Any]) -> dict[str, Any]:
     from realty_lead_gen.agents.photo_grader import PhotoGrader
     from realty_lead_gen.config import get_settings
     from realty_lead_gen.logging import configure_logging
+    from realty_lead_gen.utils.retry import TransientError
 
     settings = get_settings()
     # Here rather than in `main`: this is the first point settings are loaded,
@@ -142,6 +143,21 @@ def _grade_photos(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = asyncio.run(PhotoGrader(claude, settings).grade(urls, market_hint=market_hint))
+    except TransientError as exc:
+        # `claude_client` already sorted connection trouble, rate limits and
+        # 5xx from permanent failures; retries have been exhausted by now.
+        # Reporting it `internal`/`retryable: false` threw that away and told
+        # a caller reading the flag off docs/INTERN_BRIEF.md's table that
+        # trying again could not possibly help, when it is the one case where
+        # it can.
+        traceback.print_exc(file=sys.stderr)
+        timed_out = isinstance(exc.__cause__, TimeoutError)
+        return _fail(
+            cap,
+            "timeout" if timed_out else "unavailable",
+            f"{type(exc).__name__}: {exc}",
+            retryable=True,
+        )
     except Exception as exc:  # surface as a typed error, not a crash
         traceback.print_exc(file=sys.stderr)
         return _fail(cap, "internal", f"{type(exc).__name__}: {exc}")
