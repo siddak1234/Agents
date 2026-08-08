@@ -1,9 +1,10 @@
 """Capability 5 -- Investment Recommendation.
 
-The only capability that calls an LLM: synthesizes whatever evidence the
-caller has -- raw outputs from the other capabilities, or just their
-convenience-shortcut scores, or a mix of both -- into a final
-BUY / NEGOTIATE / REJECT call via Groq. Nothing is strictly required; a
+Synthesizes whatever evidence the caller has -- raw outputs from the other
+capabilities, or just their convenience-shortcut scores, or a mix of both --
+into a final BUY / NEGOTIATE / REJECT call. Unlike the other capabilities it
+reasons over evidence it was handed rather than researching afresh, though
+it may still search to check a claim. Nothing is strictly required; a
 caller who only ran risk_assessment still gets a recommendation, just a
 less confident one, because the model is told exactly what evidence is
 and isn't present.
@@ -19,7 +20,7 @@ import json
 from typing import Any
 
 from budget import DeadlineBudget
-from clients import groq_tool_call
+from clients import research
 
 RECOMMENDATIONS = ("BUY", "NEGOTIATE", "REJECT")
 
@@ -30,57 +31,54 @@ RECOMMENDATIONS = ("BUY", "NEGOTIATE", "REJECT")
 #: contract with the model is a deliberate, reviewable act.
 RECOMMENDATION_TOOL_NAME = "record_investment_recommendation"
 RECOMMENDATION_TOOL = {
-    "type": "function",
-    "function": {
-        "name": RECOMMENDATION_TOOL_NAME,
-        "description": (
-            "Record the final BUY / NEGOTIATE / REJECT call for this residential "
-            "property, with the evidence that drove it."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "recommendation": {
-                    "type": "string",
-                    "enum": list(RECOMMENDATIONS),
-                    "description": "The investment call.",
-                },
-                "confidence_percent": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 100,
-                    "description": (
-                        "How confident the call is, lowered in proportion to "
-                        "whatever evidence was missing."
-                    ),
-                },
-                "key_strengths": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Short points in the property's favour.",
-                },
-                "key_concerns": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Short points against it. Name any evidence gaps here."
-                    ),
-                },
-                "recommended_offer_price_inr": {
-                    "type": "number",
-                    "description": (
-                        "Offer to counter with, in INR. Omit unless an asking "
-                        "price was supplied."
-                    ),
-                },
+    "name": RECOMMENDATION_TOOL_NAME,
+    "description": (
+        "Record the final BUY / NEGOTIATE / REJECT call for this residential "
+        "property, with the evidence that drove it."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "recommendation": {
+                "type": "string",
+                "enum": list(RECOMMENDATIONS),
+                "description": "The investment call.",
             },
-            "required": [
-                "recommendation",
-                "confidence_percent",
-                "key_strengths",
-                "key_concerns",
-            ],
+            "confidence_percent": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": (
+                    "How confident the call is, lowered in proportion to "
+                    "whatever evidence was missing."
+                ),
+            },
+            "key_strengths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Short points in the property's favour.",
+            },
+            "key_concerns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Short points against it. Name any evidence gaps here."
+                ),
+            },
+            "recommended_offer_price_inr": {
+                "type": "number",
+                "description": (
+                    "Offer to counter with, in INR. Omit unless an asking "
+                    "price was supplied."
+                ),
+            },
         },
+        "required": [
+            "recommendation",
+            "confidence_percent",
+            "key_strengths",
+            "key_concerns",
+        ],
     },
 }
 
@@ -95,7 +93,7 @@ SYSTEM_PROMPT = (
 
 VALID_RISK_LEVELS = ("Low", "Medium", "High")
 # Cap serialized evidence so a caller cannot dump an unbounded object into
-# the Groq prompt. Normal capability outputs are a few KB at most.
+# the prompt. Normal capability outputs are a few KB at most.
 MAX_EVIDENCE_BYTES = 8_192
 
 
@@ -129,12 +127,11 @@ def recommend(
         )
     _enforce_evidence_size(evidence)
 
-    groq_timeout = budget.for_call(1) if budget is not None else 25.0
-    parsed = groq_tool_call(
-        json.dumps({"evidence": evidence}),
-        tool=RECOMMENDATION_TOOL,
+    parsed = research(
         system=SYSTEM_PROMPT,
-        timeout=groq_timeout,
+        prompt=json.dumps({"evidence": evidence}),
+        tool=RECOMMENDATION_TOOL,
+        timeout=budget.for_call(1) if budget is not None else 90.0,
     )
     return _validate_output(parsed)
 
@@ -215,14 +212,14 @@ def _validate_output(parsed: dict[str, Any]) -> dict[str, Any]:
     recommendation = parsed.get("recommendation")
     if recommendation not in RECOMMENDATIONS:
         raise ConnectionError(
-            f"Groq returned recommendation {recommendation!r}; expected one of "
+            f"Claude returned recommendation {recommendation!r}; expected one of "
             f"{', '.join(RECOMMENDATIONS)}"
         )
 
     raw_confidence = parsed.get("confidence_percent")
     if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
         raise ConnectionError(
-            f"Groq returned confidence_percent {raw_confidence!r}; expected a number 0-100"
+            f"Claude returned confidence_percent {raw_confidence!r}; expected a number 0-100"
         )
     # Clamping a number the model *did* supply keeps its judgment; the
     # schema already asks for 0-100, so this only catches an overshoot.

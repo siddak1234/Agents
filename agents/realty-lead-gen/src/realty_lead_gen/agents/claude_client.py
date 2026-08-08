@@ -62,39 +62,27 @@ def tool_use_input(message: anthropic.types.Message, tool_name: str) -> JSONDict
     return None
 
 
-# Cost table — USD per million tokens. Update as pricing evolves.
-# Reference at time of build: docs.claude.com/en/docs/about-claude/models
-_MODEL_PRICING: dict[str, tuple[float, float]] = {
-    # (input_usd_per_mtok, output_usd_per_mtok)
-    "claude-sonnet-4-5": (3.00, 15.00),
-    "claude-opus-4-5": (15.00, 75.00),
-    "claude-opus-4-7": (15.00, 75.00),
-    "claude-haiku-4-5": (0.25, 1.25),
-    # Fallback approximation for future models we don't yet know
-    "_default": (3.00, 15.00),
-}
-
-
 @dataclass(frozen=True, slots=True)
 class LlmUsage:
-    """Token + cost accounting for one LLM call."""
+    """Token accounting for one LLM call, and the model that produced it.
+
+    No money. A price is a vendor fact that changes without notice, and the
+    copy kept here went stale unnoticed: it priced Opus threefold high and
+    Haiku fourfold low, for a field nothing read. Cost is derived from
+    `model` and the token counts wherever it is actually needed. See
+    docs/AGENT_PROTOCOL.md.
+    """
 
     model: str
     input_tokens: int
     output_tokens: int
-    cost_usd_micros: int  # 1M micros = $1
 
     @classmethod
     def from_response(cls, model: str, usage: anthropic.types.Usage) -> LlmUsage:
-        input_mtok, output_mtok = _MODEL_PRICING.get(model, _MODEL_PRICING["_default"])
-        cost_dollars = (usage.input_tokens / 1_000_000) * input_mtok + (
-            usage.output_tokens / 1_000_000
-        ) * output_mtok
         return cls(
             model=model,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
-            cost_usd_micros=int(cost_dollars * 1_000_000),
         )
 
 
@@ -174,7 +162,6 @@ class ClaudeClient:
                     model=model,
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
-                    cost_usd_micros=usage.cost_usd_micros,
                 )
                 return resp, usage
         raise RuntimeError("unreachable")

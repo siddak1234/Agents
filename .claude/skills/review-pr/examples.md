@@ -24,14 +24,14 @@ actually returned, next to what it should have returned.
 > tokens:
 >
 > ```
-> {"ok": true, "usage": {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}}
+> {"ok": true, "usage": {"input_tokens": 0, "output_tokens": 0, "model": null}}
 > ```
 >
 > The brief's Part 2 Q7 requires usage reported for a model-calling agent. Zero
 > is for when nothing was spent; here every caller sees $0 forever, on the
 > agent's only paid capability.
 >
-> → Read `response.usage.input_tokens`/`output_tokens`, derive `cost_micros`,
+> → Read `response.usage.input_tokens`/`output_tokens` and report `model`,
 > and pass `usage=` into `ok()`, as `realty-lead-gen` wires `resp.usage` into
 > its envelope.
 </example>

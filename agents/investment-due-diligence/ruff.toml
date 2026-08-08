@@ -33,6 +33,7 @@ ignore = [
 # dependencies (agent_main.py RULE 6). The dispatch returns many typed
 # envelopes by design — folding them would obscure the protocol shape.
 "agent_main.py" = ["PLC0415", "PLR0911", "PLR0912"]
-# Best-effort paths swallow any failure on purpose (search miss, geocode miss).
-"analysis.py" = ["BLE001"]
-"clients.py" = ["BLE001"]
+# The Anthropic SDK is imported inside the call, not at module load, so
+# `describe` answers on a machine that cannot satisfy this agent's runtime
+# and a missing key never becomes an import-time crash (RULE 3, RULE 5).
+"clients.py" = ["PLC0415"]

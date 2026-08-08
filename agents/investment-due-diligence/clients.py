@@ -1,266 +1,162 @@
-"""Tavily search, Groq tool calls, and OpenStreetMap geocoding.
+"""The agent's one outbound dependency: Claude, via the official SDK.
 
-API keys are read here via os.getenv at call time -- nothing else in this
-agent touches os.environ for a credential. Every call uses plain urllib
-(stdlib only, no dependencies). Per-call timeouts are supplied by the
-caller from `DeadlineBudget` so sequential searches share one
-`deadline_ms` instead of each taking a fixed 15s.
+Every capability is the same shape — let Claude research the question with
+the server-side web search tool, then require it to report through a named
+tool whose schema mirrors the capability's `output_schema` in agent.yaml.
+`research()` is that shape, and it is the only function here.
 
-This module also keeps the request's spend tally: it is the only file that
-spends anything, so cost is recorded here as it is incurred and read once
-by agent_main.py when it builds the envelope. See `_spend` below.
+Why a forced tool rather than `output_config.format`: web search always
+enables citations, and structured outputs reject a request that carries
+them. A tool schema gets the same guarantee — the shape is part of what was
+asked for rather than checked afterwards — without the conflict.
 
-Callers never see urllib or HTTP status codes -- failures come back as
-plain built-in exceptions that agent_main.py already knows how to turn
-into an envelope:
+Failures come back as plain built-in exceptions that agent_main.py already
+maps onto an envelope:
   - RuntimeError    -> config problem (missing key, a 4xx) -> unavailable, not retryable
-  - ConnectionError -> transient problem (5xx, unreachable) -> unavailable, retryable
-  - TimeoutError    -> call didn't finish in time           -> timeout, retryable
+  - ConnectionError -> transient problem (5xx, unusable answer) -> unavailable, retryable
+  - TimeoutError    -> call didn't finish in time             -> timeout, retryable
+
+This module also keeps the request's spend tally. `usage` reports the tokens
+Claude charged and the model that produced them, never money — see
+docs/AGENT_PROTOCOL.md.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import Any
 
-TAVILY_URL = "https://api.tavily.com/search"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
-# Cap output: recommendation is a five-field JSON object; a few hundred
-# tokens is enough. Without a ceiling a degenerate completion can run away.
-GROQ_MAX_TOKENS = 512
-# Groq on-demand list price for llama-3.3-70b-versatile (USD per 1M tokens).
-# Reference: console.groq.com/docs/model/llama-3.3-70b-versatile
-GROQ_INPUT_USD_PER_MTOK = 0.59
-GROQ_OUTPUT_USD_PER_MTOK = 0.79
-# Tavily bills per API credit. Every search this agent runs is
-# `search_depth: "basic"`, which costs 1 credit; advanced would cost 2.
-# Reference: docs.tavily.com/documentation/api-credits and tavily.com/pricing
-TAVILY_CREDITS_PER_SEARCH = 1
-TAVILY_USD_PER_CREDIT = 0.008
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+#: Anthropic's default for complex agentic work. Web search needs a model in
+#: the 4.6-and-later family, which rules out the claude-sonnet-4-5 the other
+#: agents in this repository pin.
+MODEL = "claude-opus-5"
 
-# Nominatim's usage policy requires a real identifying User-Agent on every
-# request (generic/missing ones get blocked) and caps public usage at
-# 1 request/second -- fine for this agent's one-lookup-per-call pattern.
-# Groq (and some WAFs in front of it) also reject Python-urllib's default
-# User-Agent with HTTP 403, so every outbound call uses this same identity.
-USER_AGENT = "investment-due-diligence-agent/1.0"
+#: Dynamic filtering: Claude writes code that filters results before they
+#: reach its context, which keeps a multi-search turn affordable. Requires a
+#: 4.6-or-later model, which MODEL is.
+WEB_SEARCH_TOOL: dict[str, Any] = {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    #: A hard ceiling on searches per request. The capabilities here are
+    #: single-locality questions; without a cap an ambiguous address can turn
+    #: one call into a research project.
+    "max_uses": 6,
+}
 
+#: Room for search results, thinking and the final tool call.
+MAX_TOKENS = 8192
 
-# Everything this process has spent. The agent is called, not booted -- one
-# request per process -- so a module-level tally is the whole request's
-# spend. It lives here because this is the only file that spends anything,
-# and it is recorded at the moment of spending rather than returned up the
-# call stack, so a request that paid for two searches and *then* failed
-# still reports what it spent instead of zero. agent_main.py reads it once,
-# where the envelope is built.
-_spend = {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+#: The turn can pause when the server-side search loop hits its iteration
+#: limit. Resuming is just re-sending the conversation; this bounds how many
+#: times we will, so a pathological turn cannot loop forever.
+MAX_RESUMES = 4
+
+_spend: dict[str, object] = {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 def reset_spend() -> None:
     """Zeroes the tally. Called per request so in-process tests don't accrue."""
-    _spend.update(input_tokens=0, output_tokens=0, cost_micros=0)
+    _spend.update(input_tokens=0, output_tokens=0, model=None)
 
 
-def spent_usage() -> dict[str, int]:
+def spent_usage() -> dict[str, object]:
     """What this request has spent so far, in the `usage` wire shape."""
     return dict(_spend)
 
 
-def _record(*, input_tokens: int = 0, output_tokens: int = 0, cost_micros: int = 0) -> None:
-    _spend["input_tokens"] += input_tokens
-    _spend["output_tokens"] += output_tokens
-    _spend["cost_micros"] += cost_micros
+def _record(usage: Any) -> None:
+    _spend["input_tokens"] = int(_spend["input_tokens"]) + int(usage.input_tokens)  # type: ignore[arg-type]
+    _spend["output_tokens"] = int(_spend["output_tokens"]) + int(usage.output_tokens)  # type: ignore[arg-type]
+    _spend["model"] = MODEL
 
 
-def tavily_cost_micros(searches: int) -> int:
-    """USD micros (1_000_000 = $1) for `searches` basic Tavily searches."""
-    return round(searches * TAVILY_CREDITS_PER_SEARCH * TAVILY_USD_PER_CREDIT * 1_000_000)
+def _client(timeout: float) -> Any:
+    """Builds a client, or explains which credential is missing.
 
-
-def _tavily_api_key() -> str | None:
-    return os.getenv("TAVILY_API_KEY")
-
-
-def _groq_api_key() -> str | None:
-    return os.getenv("GROQ_API_KEY")
-
-
-def geocode(location: str, *, timeout: float = 10) -> dict[str, float] | None:
-    """Resolves a place name to coordinates via OpenStreetMap's Nominatim.
-
-    No API key required. Returns None (never raises) when the place can't
-    be resolved -- geocoding here is corroboration, not a hard dependency,
-    so a miss shouldn't fail whichever capability calls this.
+    Constructed per call rather than at import so `describe` never touches
+    the SDK, and so a missing key is a disabled capability rather than an
+    import-time crash (RULE 3).
     """
-    params = urllib.parse.urlencode({"q": location, "format": "json", "limit": 1})
-    request = urllib.request.Request(
-        f"{NOMINATIM_URL}?{params}",
-        headers={"User-Agent": USER_AGENT},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
-        results = json.loads(raw)
-    except Exception:
-        return None
+    import anthropic
 
-    if not results:
-        return None
-    try:
-        return {"latitude": float(results[0]["lat"]), "longitude": float(results[0]["lon"])}
-    except (KeyError, ValueError, TypeError):
-        return None
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+    return anthropic.Anthropic(timeout=timeout, max_retries=2)
 
 
-def tavily_search(query: str, *, max_results: int = 5, timeout: float = 15) -> list[dict[str, Any]]:
-    """Runs a Tavily search and returns its `results` list."""
-    api_key = _tavily_api_key()
-    if not api_key:
-        raise RuntimeError("TAVILY_API_KEY is not configured")
-
-    body = json.dumps(
-        {
-            "query": query,
-            "search_depth": "basic",
-            "max_results": max_results,
-            "include_answer": False,
-        }
-    ).encode("utf-8")
-    # Bearer header, not an `api_key` field in the body. Tavily's current API
-    # reference documents header auth only, and the official client
-    # (tavily-ai/tavily-python) sends `Authorization: Bearer <key>` and never
-    # puts the key in the payload. Body auth is a legacy form: undocumented
-    # today, and if it stops being honoured every search here returns 401 ->
-    # `unavailable`, which reads like graceful degradation while meaning the
-    # agent never works at all. Keeping the key out of the body also keeps it
-    # out of anything that logs request payloads.
-    request = urllib.request.Request(
-        TAVILY_URL,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    data = _call(request, timeout=timeout, service="Tavily search")
-    # Counted only once the call came back 200: a rejected key, a 429 or a
-    # connection failure raises out of `_call` above and bills nothing.
-    _record(cost_micros=tavily_cost_micros(1))
-    results = data.get("results", [])
-    return results if isinstance(results, list) else []
-
-
-def groq_tool_call(
-    prompt: str, *, tool: dict[str, Any], system: str | None = None, timeout: float = 25
+def research(
+    *,
+    system: str,
+    prompt: str,
+    tool: dict[str, Any],
+    timeout: float = 90.0,
 ) -> dict[str, Any]:
-    """Calls Groq, forcing one named tool call, and returns its arguments.
+    """Research `prompt` with web search, and return `tool`'s arguments.
 
-    `response_format: json_object` only guaranteed *syntax* — the model
-    could return `{}` and the caller had to invent the missing fields.
-    Forcing a named tool puts the caller's JSON Schema in the request, so
-    the shape is part of what was asked for rather than something checked
-    after the fact. Groq answers a tool the model refuses to call with
-    HTTP 400, which surfaces here as `unavailable` carrying Groq's detail.
-
-    Returns the tool's arguments. Token spend is recorded to this module's
-    tally rather than returned, so it is reported even when the arguments
-    turn out to be unusable; cost is derived from the model's published
-    per-MTok rates, since Groq's payload has tokens but not dollars.
+    Claude decides what to search; the tool schema decides what it must come
+    back with. An answer that never calls the tool is a model failure rather
+    than a caller error, so it surfaces as retryable `unavailable`.
     """
-    api_key = _groq_api_key()
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not configured")
+    import anthropic
 
-    tool_name = tool["function"]["name"]
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
-    body = json.dumps(
-        {
-            "model": GROQ_MODEL,
-            "messages": messages,
-            "tools": [tool],
-            "tool_choice": {"type": "function", "function": {"name": tool_name}},
-            "temperature": 0.2,
-            "max_tokens": GROQ_MAX_TOKENS,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        GROQ_URL,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    data = _call(request, timeout=timeout, service="Groq")
-
-    # Recorded before the response is inspected: those tokens are billed
-    # whether or not the model came back with a tool call anyone can use.
-    raw_usage = data.get("usage") or {}
-    input_tokens = int(raw_usage.get("prompt_tokens", 0) or 0)
-    output_tokens = int(raw_usage.get("completion_tokens", 0) or 0)
-    _record(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cost_micros=groq_cost_micros(input_tokens, output_tokens),
-    )
+    client = _client(timeout)
+    tool_name = tool["name"]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
 
     try:
-        call = data["choices"][0]["message"]["tool_calls"][0]
-        if call["function"]["name"] != tool_name:
-            raise ConnectionError(
-                f"Groq called {call['function']['name']!r}, not the required {tool_name!r}"
+        for _ in range(MAX_RESUMES + 1):
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                system=system,
+                tools=[WEB_SEARCH_TOOL, tool],
+                messages=messages,
             )
-        parsed = json.loads(call["function"]["arguments"])
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise ConnectionError(f"Groq returned an unparsable tool call: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise ConnectionError("Groq returned tool arguments that are not an object")
+            # Recorded before the response is inspected: those tokens are
+            # billed whether or not the answer turns out to be usable.
+            _record(response.usage)
 
-    return parsed
+            recorded = _tool_input(response, tool_name)
+            if recorded is not None:
+                return recorded
+
+            if response.stop_reason != "pause_turn":
+                break
+            # A paused turn resumes by sending it back unchanged.
+            messages.append({"role": "assistant", "content": response.content})
+    except anthropic.APITimeoutError as exc:
+        raise TimeoutError(f"Claude did not respond within {timeout:.0f}s") from exc
+    except anthropic.APIConnectionError as exc:
+        raise ConnectionError(f"Claude is unreachable: {exc}") from exc
+    except anthropic.RateLimitError as exc:
+        raise ConnectionError(f"Claude rate-limited this request: {exc}") from exc
+    except anthropic.APIStatusError as exc:
+        if exc.status_code >= 500:
+            raise ConnectionError(f"Claude returned HTTP {exc.status_code}") from exc
+        # 4xx is a configuration problem — a rejected key, a malformed
+        # request. Retrying will not fix it.
+        raise RuntimeError(f"Claude returned HTTP {exc.status_code}: {exc}") from exc
+
+    raise ConnectionError(f"Claude never called {tool_name!r}; no usable answer was produced")
 
 
-def groq_cost_micros(input_tokens: int, output_tokens: int) -> int:
-    """USD micros (1_000_000 = $1) for a Groq llama-3.3-70b-versatile call."""
-    cost_dollars = (input_tokens / 1_000_000) * GROQ_INPUT_USD_PER_MTOK + (
-        output_tokens / 1_000_000
-    ) * GROQ_OUTPUT_USD_PER_MTOK
-    return round(cost_dollars * 1_000_000)
+def _tool_input(response: Any, tool_name: str) -> dict[str, Any] | None:
+    """The named tool's arguments, or None if this turn did not call it.
+
+    Matched on name: the same turn carries `server_tool_use` blocks for web
+    search, and reading those as the reporting tool's arguments would hand a
+    caller a search query where it expected a result.
+    """
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == tool_name:
+            recorded = block.input
+            if not isinstance(recorded, dict):
+                raise ConnectionError(f"Claude called {tool_name!r} with a non-object input")
+            return recorded
+    return None
 
 
-def _call(request: urllib.request.Request, *, timeout: float, service: str) -> dict[str, Any]:
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = ""
-        try:
-            detail = exc.read().decode("utf-8", errors="replace").strip()
-        except Exception:
-            detail = ""
-        suffix = f": {detail}" if detail else ""
-        if exc.code >= 500 or exc.code == 429:
-            raise ConnectionError(f"{service} returned HTTP {exc.code}{suffix}") from exc
-        raise RuntimeError(f"{service} returned HTTP {exc.code}{suffix}") from exc
-    except TimeoutError as exc:
-        raise TimeoutError(f"{service} did not respond within {timeout:.0f}s") from exc
-    except urllib.error.URLError as exc:
-        raise ConnectionError(f"{service} is unreachable: {exc.reason}") from exc
-
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ConnectionError(f"{service} returned invalid JSON") from exc
+def searches_performed(response: Any) -> int:
+    """How many web searches a response billed. Used by tests, not by callers."""
+    server = getattr(response.usage, "server_tool_use", None)
+    return int(getattr(server, "web_search_requests", 0) or 0)

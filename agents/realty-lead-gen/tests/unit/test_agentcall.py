@@ -49,7 +49,6 @@ def _fake_result() -> SimpleNamespace:
             model="claude-test",
             input_tokens=11,
             output_tokens=7,
-            cost_usd_micros=42,
         ),
     )
 
@@ -147,7 +146,7 @@ class TestDescribe:
 
     def test_usage_is_zero(self) -> None:
         envelope = agentcall._dispatch(_request(capability="describe"))
-        assert envelope["usage"] == {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+        assert envelope["usage"] == {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 @pytest.mark.unit
@@ -194,8 +193,11 @@ class TestGradePhotosExecution:
         assert envelope["output"]["overall_condition"] == "C3"
         assert envelope["output"]["rehab_total_low_cents"] == 1_200_000
         assert envelope["output"]["model"] == "claude-test"
-        # The envelope renames cost_usd_micros; both are micros of USD.
-        assert envelope["usage"] == {"input_tokens": 11, "output_tokens": 7, "cost_micros": 42}
+        assert envelope["usage"] == {
+            "input_tokens": 11,
+            "output_tokens": 7,
+            "model": "claude-test",
+        }
 
     def test_grader_crash_becomes_typed_internal_error(
         self, monkeypatch: pytest.MonkeyPatch

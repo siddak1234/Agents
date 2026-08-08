@@ -77,7 +77,7 @@ class TestDescribe(unittest.TestCase):
     def test_costs_nothing_and_needs_no_keys(self):
         envelope = call("describe")
         self.assertTrue(envelope["ok"])
-        self.assertEqual(envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0})
+        self.assertEqual(envelope["usage"], {"input_tokens": 0, "output_tokens": 0, "model": None})
 
 
 class TestProtocolHygiene(unittest.TestCase):
@@ -126,9 +126,19 @@ class TestPropertyIntelligence(unittest.TestCase):
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 
-    def test_succeeds_without_a_tavily_key(self):
-        # Corroboration search is best-effort: no key degrades gracefully
-        # instead of failing the capability.
+    def test_without_a_key_it_is_unavailable_not_a_degraded_guess(self):
+        """A contract change worth stating: this used to answer without a key.
+
+        When corroboration was a best-effort Tavily search, a missing key
+        left the capability returning what the caller had already told it --
+        the address split into a location, the price divided by the area,
+        and the first comma-segment guessed as the builder. That looked like
+        a verified profile and was not one.
+
+        The profile is now researched, so there is nothing honest to return
+        without a key. Reporting `unavailable` says so; the alternative was
+        echoing the input back under the word "verified".
+        """
         envelope = call(
             "property_intelligence",
             {
@@ -137,10 +147,9 @@ class TestPropertyIntelligence(unittest.TestCase):
                 "area_sqft": 1650,
             },
         )
-        self.assertTrue(envelope["ok"], envelope.get("error"))
-        self.assertEqual(envelope["output"]["location"], "Whitefield, Bangalore")
-        self.assertEqual(envelope["output"]["builder"], "Prestige Lakeside Habitat")
-        self.assertAlmostEqual(envelope["output"]["price_per_sqft"], 14000000 / 1650, places=2)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["type"], "unavailable")
+        self.assertIn("ANTHROPIC_API_KEY", envelope["error"]["message"])
 
     def test_commercial_property_is_rejected(self):
         envelope = call(
@@ -208,7 +217,7 @@ class TestFlexibleInput(unittest.TestCase):
         )
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
-        self.assertIn("GROQ_API_KEY is not configured", envelope["error"]["message"])
+        self.assertIn("ANTHROPIC_API_KEY is not configured", envelope["error"]["message"])
 
     def test_recommendation_accepts_shortcut_scores_without_raw_objects(self):
         envelope = call(
@@ -217,7 +226,7 @@ class TestFlexibleInput(unittest.TestCase):
         )
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
-        self.assertIn("GROQ_API_KEY is not configured", envelope["error"]["message"])
+        self.assertIn("ANTHROPIC_API_KEY is not configured", envelope["error"]["message"])
 
     def test_recommendation_rejects_completely_empty_evidence(self):
         envelope = call("investment_recommendation", {})
@@ -226,7 +235,7 @@ class TestFlexibleInput(unittest.TestCase):
 
 
 class TestMissingCredentials(unittest.TestCase):
-    """TAVILY_API_KEY / GROQ_API_KEY absent -> unavailable, not a crash."""
+    """ANTHROPIC_API_KEY absent -> unavailable, not a crash."""
 
     def test_financial_analysis(self):
         envelope = call(
@@ -263,7 +272,7 @@ class TestMissingCredentials(unittest.TestCase):
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "unavailable")
         self.assertFalse(envelope["error"]["retryable"])
-        self.assertIn("GROQ_API_KEY is not configured", envelope["error"]["message"])
+        self.assertIn("ANTHROPIC_API_KEY is not configured", envelope["error"]["message"])
 
 
 class TestInputValidation(unittest.TestCase):

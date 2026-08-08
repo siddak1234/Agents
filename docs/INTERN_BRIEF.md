@@ -327,7 +327,7 @@ you on a fork, so this list is the review your work gets first:
 - [ ] No `TODO(new agent)` marker left anywhere in your folder
 - [ ] If it calls a model, you built all three things question 7 asks for —
       structured output through a tool schema, graceful degradation without a
-      key, and `usage` reporting a real `cost_micros`. That question is easy to
+      key, and `usage` naming the model it called. That question is easy to
       answer yes to and then only half-build; the pull request template lists
       them separately for the same reason
 
@@ -379,7 +379,7 @@ Success envelope out, on stdout:
 ```json
 {"protocol": "agentcall/v1", "ok": true, "capability": "normalize_address",
  "output": {"normalized": "123 N MAIN ST"},
- "usage": {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0},
+ "usage": {"input_tokens": 0, "output_tokens": 0, "model": null},
  "error": null}
 ```
 
@@ -388,7 +388,7 @@ Failure envelope out, on stdout:
 ```json
 {"protocol": "agentcall/v1", "ok": false, "capability": "normalize_address",
  "output": null,
- "usage": {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0},
+ "usage": {"input_tokens": 0, "output_tokens": 0, "model": null},
  "error": {"type": "invalid_request", "message": "'address' must be a non-empty string",
            "retryable": false}}
 ```
@@ -638,7 +638,7 @@ def fail(capability: str, etype: str, message: str, *, retryable: bool = False) 
 def zero_usage() -> dict[str, int]:
     # Always report usage, zeroed when nothing was spent. Optional accounting
     # is accounting that gets forgotten.
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 if __name__ == "__main__":

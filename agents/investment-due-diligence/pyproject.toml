@@ -5,7 +5,7 @@ name = "investment-due-diligence"
 version = "0.1.0"
 description = "Indian residential real-estate investment due diligence over agentcall/v1."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["anthropic>=0.40"]
 
 [project.optional-dependencies]
 dev = ["ruff>=0.14"]

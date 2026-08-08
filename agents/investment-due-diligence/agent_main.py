@@ -264,14 +264,15 @@ def fail(capability: str, etype: str, message: str, *, retryable: bool = False) 
     }
 
 
-def zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+def zero_usage() -> dict[str, object]:
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 # ---------------------------------------------------------------------------
-# Spend. Tavily bills per search and returns no tokens, so the four search
-# capabilities have a real `cost_micros` and no token counts at all. Both
-# helpers reach clients.py through `sys.modules` rather than importing it:
+# Spend. `usage` carries token counts and the model that produced them, never
+# money -- see docs/AGENT_PROTOCOL.md. The four search capabilities call no
+# model, so they report zeros and a null model. Both helpers reach clients.py
+# through `sys.modules` rather than importing it:
 # a module `describe` never loaded cannot have spent anything, and asking
 # through the module table keeps that path free of clients.py entirely
 # (RULE 6, the same reason the capability imports are lazy).
@@ -283,7 +284,7 @@ def _reset_spend() -> None:
         clients.reset_spend()
 
 
-def _spent_usage() -> dict[str, int]:
+def _spent_usage() -> dict[str, object]:
     """What this request spent, read once where the envelope is built.
 
     Both success and failure go through here, so a request that paid for

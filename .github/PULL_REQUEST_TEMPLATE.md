@@ -45,9 +45,9 @@ from the brief; it is what review found underneath them.
       able to turn a good answer into a failure
 - [ ] The output is checked against the types `agent.yaml` declares, not just
       for the presence of its keys
-- [ ] `usage` carries real `input_tokens`/`output_tokens` **and a computed
-      `cost_micros`** — including on a failure that happened after the call,
-      where the tokens were already billed
+- [ ] `usage` carries real `input_tokens`/`output_tokens` **and the model it
+      called in `usage.model`** — including on a failure that happened after
+      the call, where the tokens were already billed
 - [ ] A model that returns something unusable is not reported as
       `invalid_request` — the caller's request was fine
 

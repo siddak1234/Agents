@@ -32,7 +32,7 @@ import json, os, sys, time
 P = "agentcall/v1"
 def env(ok, cap, out=None, err=None):
     return {"protocol": P, "ok": ok, "capability": cap, "output": out,
-            "usage": {"input_tokens": 1, "output_tokens": 2, "cost_micros": 3},
+            "usage": {"input_tokens": 1, "output_tokens": 2, "model": "test-model"},
             "error": err}
 real = sys.stdout
 sys.stdout = sys.stderr
@@ -123,7 +123,7 @@ def test_describe_round_trips(stub):
     result = describe(stub)
     assert result.ok
     assert result.output["name"] == "stub-agent"
-    assert result.usage.cost_micros == 3
+    assert result.usage.model == "test-model"
 
 
 def test_input_reaches_the_agent(stub):
@@ -457,7 +457,7 @@ def _envelope(**overrides) -> str:
         "ok": True,
         "capability": "x",
         "output": {"n": 1},
-        "usage": {"input_tokens": 5, "output_tokens": 6, "cost_micros": 7},
+        "usage": {"input_tokens": 5, "output_tokens": 6, "model": "test-model"},
         "error": None,
     }
     body.update(overrides)
@@ -505,10 +505,35 @@ def test_a_negative_usage_count_is_rejected():
         CallResult.decode(_envelope(usage={"input_tokens": -1}), capability="x")
 
 
+def test_usage_reports_the_model_not_money():
+    """The contract carries `model`; a stale `cost_micros` is not a model.
+
+    An agent that never migrated still decodes -- it just reports having
+    called no model, which is what `model: null` says. The failure mode is
+    an honest absence, not a wrong number, which is the whole point of the
+    change (docs/AGENT_PROTOCOL.md).
+    """
+    stale = CallResult.decode(
+        _envelope(usage={"input_tokens": 9, "output_tokens": 3, "cost_micros": 4200}),
+        capability="x",
+    )
+    assert stale.usage.model is None
+    assert stale.usage.input_tokens == 9
+    assert not hasattr(stale.usage, "cost_micros")
+
+
+def test_usage_model_must_be_a_string_or_null():
+    with pytest.raises(ProtocolError, match=r"usage\.model"):
+        CallResult.decode(
+            _envelope(usage={"input_tokens": 0, "output_tokens": 0, "model": 7}),
+            capability="x",
+        )
+
+
 def test_usage_may_report_zeros_when_nothing_was_spent():
     """The whole point of mandatory accounting is that zero is a real answer."""
     result = CallResult.decode(_envelope(usage={}), capability="x")
-    assert (result.usage.input_tokens, result.usage.cost_micros) == (0, 0)
+    assert (result.usage.input_tokens, result.usage.model) == (0, None)
 
 
 def test_an_agent_cannot_emit_a_transport_error():

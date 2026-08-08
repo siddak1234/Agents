@@ -190,11 +190,9 @@ class TestMaintenancePlanner(unittest.TestCase):
         with patch("planner.call_llm", return_value=plan_response()):
             envelope = call("generate_maintenance_plan", VALID_INPUT)
 
-        # claude-sonnet-4-5 at $3.00/$15.00 per Mtok:
-        # 1000/1e6*3 + 500/1e6*15 = $0.0105 = 10_500 micros.
         self.assertEqual(
             envelope["usage"],
-            {"input_tokens": 1000, "output_tokens": 500, "cost_micros": 10_500},
+            {"input_tokens": 1000, "output_tokens": 500, "model": planner.MODEL},
         )
 
     def test_model_output_failure_is_internal_not_the_callers_fault(self) -> None:
@@ -218,7 +216,7 @@ class TestMaintenancePlanner(unittest.TestCase):
 
         # The call was billed before its output could be inspected.
         self.assertEqual(envelope["usage"]["input_tokens"], 1000)
-        self.assertEqual(envelope["usage"]["cost_micros"], 10_500)
+        self.assertEqual(envelope["usage"]["model"], planner.MODEL)
 
     def test_wrongly_typed_plan_is_not_reported_as_success(self) -> None:
         bad = {**VALID_PLAN, "risks": "vibration on COMP-11"}
@@ -278,11 +276,12 @@ class TestStructuredOutput(unittest.TestCase):
         self.assertEqual(captured["model"], planner.MODEL)
 
 
-class TestPricing(unittest.TestCase):
-    def test_unknown_model_falls_back_rather_than_raising(self) -> None:
-        usage = planner.price("some-future-model", 1_000_000, 0)
+class TestUsage(unittest.TestCase):
+    def test_usage_names_the_model_and_reports_no_money(self) -> None:
+        usage = planner.usage_for("some-future-model", 1_000_000, 0)
 
-        self.assertEqual(usage["cost_micros"], 3_000_000)
+        self.assertEqual(usage["model"], "some-future-model")
+        self.assertNotIn("cost_micros", usage)
 
 
 if __name__ == "__main__":
