@@ -426,42 +426,50 @@ def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
 
     failed = 0
     for manifest in selected:
-        result = describe(manifest)
-        if not result.ok:
+        problem = _check_problem(manifest)
+        if problem:
             failed += 1
-            detail = result.error.message if result.error else "unknown failure"
-            print(f"FAIL  {manifest.name}\n      {detail}", file=sys.stderr)
-            continue
-
-        # The agent ran — but does it offer what it advertises? Printing the
-        # manifest's list here would restate the file we just read and prove
-        # nothing. Comparing it against what the agent reported is the whole
-        # point of a handshake: a capability declared and not implemented is a
-        # caller's runtime error, and one implemented and not declared is
-        # outside the contract.
-        drift = _describe_drift(manifest, result.output)
-        if drift:
-            failed += 1
-            print(f"FAIL  {manifest.name}\n      {drift}", file=sys.stderr)
-            continue
-
-        # A field the contract removed still decodes, so nothing at runtime
-        # complains — the agent just reports having called no model. That is
-        # a wrong claim arriving quietly, which is what a gate is for.
-        if result.stale_usage:
-            failed += 1
-            fields = ", ".join(f"usage.{f}" for f in result.stale_usage)
-            print(
-                f"FAIL  {manifest.name}\n"
-                f"      emits {fields}, which the contract removed — the envelope "
-                f"decodes as `model: null`, silently claiming no model was called.\n"
-                f"      Report `usage.model` instead; see docs/AGENT_PROTOCOL.md.",
-                file=sys.stderr,
-            )
+            print(f"FAIL  {manifest.name}\n      {problem}", file=sys.stderr)
             continue
 
         print(f"ok    {manifest.name}  ({', '.join(manifest.capability_names)})")
     return 1 if failed else 0
+
+
+def _check_problem(manifest: AgentManifest) -> str | None:
+    """Everything `agents check` asks of one agent, or None if it passes.
+
+    `agents check` and `agents verify`'s check gate ran two copies of this,
+    and a check added to one silently did not exist in the other — `verify`
+    printed `ok  agents check` on a tree where `agents check` exited 1. That
+    is the same green-locally/red-in-CI split `test_verify.py` exists to
+    prevent, so there is one implementation and both call it.
+    """
+    result = describe(manifest)
+    if not result.ok:
+        return result.error.message if result.error else "unknown failure"
+
+    # The agent ran — but does it offer what it advertises? Printing the
+    # manifest's list here would restate the file we just read and prove
+    # nothing. Comparing it against what the agent reported is the whole
+    # point of a handshake: a capability declared and not implemented is a
+    # caller's runtime error, and one implemented and not declared is
+    # outside the contract.
+    if drift := _describe_drift(manifest, result.output):
+        return drift
+
+    # A field the contract removed still decodes, so nothing at runtime
+    # complains — the agent just reports having called no model. That is
+    # a wrong claim arriving quietly, which is what a gate is for.
+    if result.stale_usage:
+        fields = ", ".join(f"usage.{f}" for f in result.stale_usage)
+        return (
+            f"emits {fields}, which the contract removed — the envelope decodes as "
+            f"`model: null`, silently claiming no model was called.\n"
+            f"      Report `usage.model` instead; see docs/AGENT_PROTOCOL.md."
+        )
+
+    return None
 
 
 def _cmd_test(registry: Registry, args: argparse.Namespace) -> int:
@@ -695,13 +703,13 @@ def _verify_strict(registry: Registry, args: argparse.Namespace) -> tuple[str, s
 
 
 def _verify_check(registry: Registry, args: argparse.Namespace) -> tuple[str, str]:
-    failures = []
-    for manifest in _verify_scope(registry, args):
-        result = describe(manifest)
-        if not result.ok:
-            failures.append(f"{manifest.name}: {result.error.message if result.error else '?'}")
-        elif drift := _describe_drift(manifest, result.output):
-            failures.append(f"{manifest.name}: {drift}")
+    """The same gate `agents check` runs — deliberately the same code, see
+    `_check_problem`."""
+    failures = [
+        f"{manifest.name}: {problem}"
+        for manifest in _verify_scope(registry, args)
+        if (problem := _check_problem(manifest))
+    ]
     return ("FAIL", "\n".join(failures)) if failures else ("ok", "")
 
 

@@ -614,3 +614,29 @@ def test_check_fails_an_agent_still_emitting_a_removed_usage_field(stub, capsys)
     err = capsys.readouterr().err
     assert "usage.cost_micros" in err
     assert "stub-agent" in err
+
+
+def test_verify_and_check_agree_on_a_stale_usage_field(stub, capsys):
+    """The two gates must not diverge — one used to have a check the other lacked.
+
+    `agents check` gained the stale-usage check in #28 and `agents verify`'s copy
+    of the same gate did not, so `verify` printed `ok  agents check` on a tree
+    where `agents check` exited 1. A contributor sees green and CI goes red,
+    which is the split test_verify.py exists to prevent.
+    """
+    source = stub.workdir / "agent_main.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace('"model": "test-model"', '"cost_micros": 4200'),
+        encoding="utf-8",
+    )
+    root = str(stub.workdir.parent)
+
+    assert main(["--root", root, "check"]) == 1
+    check_err = capsys.readouterr().err
+    assert "usage.cost_micros" in check_err
+
+    # Same tree, same gate, through verify. It must not report ok.
+    assert main(["--root", root, "verify", "stub-agent"]) != 0
+    verify_out = capsys.readouterr().out
+    check_line = next(ln for ln in verify_out.splitlines() if "agents check" in ln)
+    assert check_line.strip().startswith("FAIL"), f"verify disagreed with check: {check_line!r}"
