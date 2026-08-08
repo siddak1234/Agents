@@ -1,15 +1,17 @@
 """Maintenance planning: one Claude call, structured through a tool schema.
 
 The capability's business logic lives here; `agentcall.py` is the adapter that
-translates this module's exceptions into `agentcall/v1` error types. The three
+translates this module's exceptions into `agentcall/v1` error types. The four
 exception types below are that translation's whole vocabulary — they exist so
-the adapter can tell a caller's mistake apart from the model's, which a bare
-`ValueError` cannot.
+the adapter can tell a caller's mistake apart from the model's, and a failure
+worth retrying apart from one that is not, none of which a bare `ValueError`
+can.
 """
 
 from __future__ import annotations
 
 import os
+from http import HTTPStatus
 from typing import Any
 
 from prompts import SYSTEM_PROMPT
@@ -115,6 +117,20 @@ class MissingCredentialError(RuntimeError):
     """A needed credential is absent. Becomes `unavailable`."""
 
 
+class TransientModelError(RuntimeError):
+    """A call failed in a way retrying might fix — a dropped connection, a
+    timeout, a rate limit, or the vendor's own 5xx. Becomes `unavailable` or
+    `timeout`, both `retryable: true` — the one case in this module where
+    `internal`'s documented `retryable: false` would be the wrong answer, and
+    reporting it that way told a caller a retry could not possibly help when
+    this is exactly the failure retrying is for.
+
+    `MAX_RETRIES` above already exhausted the SDK's own retry budget before
+    this was raised; what reaches here is what survived that. The caller's
+    own retry, at the protocol level, is the next thing that could help.
+    """
+
+
 class ModelOutputError(RuntimeError):
     """The model's own output was unusable. Becomes `internal`, retryable.
 
@@ -146,6 +162,44 @@ def usage_for(model: str, input_tokens: int, output_tokens: int) -> dict[str, ob
     }
 
 
+#: 4xx codes worth another attempt — the request was fine, the timing wasn't.
+#: Everything else in the 4xx range describes a request that fails the same
+#: way on the next attempt, so retrying only burns the rate-limit budget.
+_TRANSIENT_CLIENT_STATUS = frozenset(
+    {
+        HTTPStatus.REQUEST_TIMEOUT,  # 408
+        HTTPStatus.TOO_EARLY,  # 425 — replay risk; the retry is the fix
+        HTTPStatus.TOO_MANY_REQUESTS,  # 429
+    }
+)
+
+#: 5xx codes that are *not* worth retrying: stable statements about the
+#: server's capabilities, not this attempt's luck.
+_PERMANENT_SERVER_STATUS = frozenset(
+    {
+        HTTPStatus.NOT_IMPLEMENTED,  # 501
+        HTTPStatus.HTTP_VERSION_NOT_SUPPORTED,  # 505
+    }
+)
+
+_SERVER_ERROR_CEILING = 600  # first status past the 5xx range
+
+
+def _is_transient_status(code: int) -> bool:
+    """Mirrors realty-lead-gen's `utils/http.py::is_transient_status`, so
+    "does a retry help" is one answer across the repository rather than a
+    per-agent opinion — the reason that module exists in the first place.
+    Not imported: agents here do not depend on each other, so this is a
+    kept-in-step copy, the same trade `commercial-lease-agent`'s own
+    `_is_transient` already made.
+    """
+    if code in _TRANSIENT_CLIENT_STATUS:
+        return True
+    return HTTPStatus.INTERNAL_SERVER_ERROR <= code < _SERVER_ERROR_CEILING and (
+        code not in _PERMANENT_SERVER_STATUS
+    )
+
+
 def call_llm(user_prompt: str):
     """Call Claude with the plan tool forced, and return the raw response."""
     # Imported here, not at module scope: `describe` must answer on a machine
@@ -170,6 +224,15 @@ def call_llm(user_prompt: str):
         # puts both under `unavailable`; letting this fall through to the
         # blanket handler would report a config error as `internal`.
         raise MissingCredentialError(f"ANTHROPIC_API_KEY was rejected: {exc}") from exc
+    except (anthropic.APIConnectionError, anthropic.RateLimitError, TimeoutError) as exc:
+        # A dropped connection, a request that timed out, or a rate limit —
+        # none of them says the request was wrong. `APITimeoutError`
+        # subclasses `APIConnectionError`, so it is already covered here.
+        raise TransientModelError(f"{type(exc).__name__}: {exc}") from exc
+    except anthropic.APIStatusError as exc:
+        if exc.status_code and _is_transient_status(exc.status_code):
+            raise TransientModelError(f"{type(exc).__name__}: {exc}") from exc
+        raise
 
 
 def _create(client, user_prompt: str):

@@ -173,6 +173,66 @@ class TestInputValidation(unittest.TestCase):
         self.assertEqual(envelope["error"]["type"], "unavailable")
         self.assertFalse(envelope["error"]["retryable"])
 
+    def test_a_rate_limit_is_unavailable_and_retryable(self) -> None:
+        """The `internal`/`retryable:false` default was wrong for this one —
+        a 429 says nothing about the request, only about timing, and the
+        SDK's own retry budget (MAX_RETRIES) has already been spent by the
+        time this reaches here.
+        """
+        limited = anthropic.RateLimitError(
+            "rate limited",
+            response=httpx.Response(429, request=httpx.Request("POST", "https://x")),
+            body=None,
+        )
+        with patch("planner._create", side_effect=limited), patch.dict(
+            os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}
+        ):
+            envelope = call("generate_maintenance_plan", VALID_INPUT)
+
+        self.assertEqual(envelope["error"]["type"], "unavailable")
+        self.assertTrue(envelope["error"]["retryable"])
+
+    def test_a_5xx_is_unavailable_and_retryable(self) -> None:
+        server_error = anthropic.InternalServerError(
+            "server error",
+            response=httpx.Response(500, request=httpx.Request("POST", "https://x")),
+            body=None,
+        )
+        with patch("planner._create", side_effect=server_error), patch.dict(
+            os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}
+        ):
+            envelope = call("generate_maintenance_plan", VALID_INPUT)
+
+        self.assertEqual(envelope["error"]["type"], "unavailable")
+        self.assertTrue(envelope["error"]["retryable"])
+
+    def test_a_permanent_5xx_stays_internal(self) -> None:
+        """501/505 are stable statements about the server's capability, not
+        this attempt's luck — retrying gets the same answer, so this must
+        not be reported the same way as a 500.
+        """
+        not_implemented = anthropic.APIStatusError(
+            "not implemented",
+            response=httpx.Response(501, request=httpx.Request("POST", "https://x")),
+            body=None,
+        )
+        with patch("planner._create", side_effect=not_implemented), patch.dict(
+            os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}
+        ):
+            envelope = call("generate_maintenance_plan", VALID_INPUT)
+
+        self.assertEqual(envelope["error"]["type"], "internal")
+        self.assertFalse(envelope["error"]["retryable"])
+
+    def test_a_bare_timeout_is_reported_as_timeout_not_unavailable(self) -> None:
+        with patch("planner._create", side_effect=TimeoutError("deadline exceeded")), patch.dict(
+            os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}
+        ):
+            envelope = call("generate_maintenance_plan", VALID_INPUT)
+
+        self.assertEqual(envelope["error"]["type"], "timeout")
+        self.assertTrue(envelope["error"]["retryable"])
+
 
 class TestMaintenancePlanner(unittest.TestCase):
     """The happy path, and what the model can do wrong."""

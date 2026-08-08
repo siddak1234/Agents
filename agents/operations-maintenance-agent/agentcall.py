@@ -107,14 +107,15 @@ def _dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
             InvalidInputError,
             MissingCredentialError,
             ModelOutputError,
+            TransientModelError,
             generate_maintenance_plan,
         )
 
         # RULE 4: validate your own input and say precisely what was wrong. The
         # orchestrator does not validate for you — the schema in agent.yaml is
         # documentation, and two validators would drift. `planner` does the
-        # checking; the three exception types below are how it reports which
-        # side of the call went wrong.
+        # checking; the four exception types below are how it reports which
+        # side of the call went wrong, and whether trying again could help.
         try:
             response = generate_maintenance_plan(payload)
         except InvalidInputError as exc:
@@ -124,6 +125,21 @@ def _dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
             # RULE 3: a missing credential is a disabled capability, not a
             # crash — and never a substring match on someone else's message.
             return fail(capability, "unavailable", str(exc))
+        except TransientModelError as exc:
+            # `planner` already sorted connection trouble, timeouts, rate
+            # limits and retryable 5xx from permanent failures, and the SDK's
+            # own retry budget (MAX_RETRIES) is already spent by the time this
+            # is raised. Reporting it `internal`/`retryable: false` — the
+            # generic handler below — told a caller a retry could not
+            # possibly help, in the one case where it can.
+            traceback.print_exc(file=sys.stderr)
+            timed_out = isinstance(exc.__cause__, TimeoutError)
+            return fail(
+                capability,
+                "timeout" if timed_out else "unavailable",
+                f"{type(exc).__name__}: {exc}",
+                retryable=True,
+            )
         except ModelOutputError as exc:
             # The caller's request was fine and the model's answer was not.
             # `internal` with the type's documented `retryable: false`: the
