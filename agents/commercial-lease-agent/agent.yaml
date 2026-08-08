@@ -42,10 +42,11 @@ capabilities:
       as an array of per-page text. Uses a language model with multi-shot
       prompting and a tool schema for structured output. Returns each
       clause's type, exact source quote, physical page number, and a
-      confidence score. Every quote returned has been found in the pages
-      supplied — a clause the model cannot be shown to have read is dropped
-      rather than reported with a guessed page. Requires ANTHROPIC_API_KEY,
-      and returns `unavailable` rather than failing when it is absent.
+      confidence score. Every clause in `clauses` has had its quote found in
+      the pages supplied; one that could not be located is reported in
+      `unverified_clauses` rather than dropped, so a caller can tell an absent
+      obligation from an unverifiable quote. Requires ANTHROPIC_API_KEY, and
+      returns `unavailable` rather than failing when it is absent.
     input_schema:
       type: object
       required: [lease_pages]
@@ -56,16 +57,28 @@ capabilities:
           maxItems: 1000
           items: { type: string }
           description: >-
-            Raw text of each physical page, in order; index 0 is page 1.
-            At most 1000 pages — each chunk of pages costs one model call,
-            so a longer document is split by the caller.
+            Raw text of each physical page, in order; index 0 is the page
+            numbered first_page_number. At most 1000 pages and 4,000,000
+            characters in total — that is what one request costs — so a
+            longer document is split by the caller.
+        first_page_number:
+          type: integer
+          minimum: 1
+          default: 1
+          description: >-
+            The real page number of lease_pages[0]. Pass it when sending part
+            of a document, so returned page numbers refer to the whole lease
+            rather than to the slice.
       additionalProperties: false
     output_schema:
       type: object
-      required: [clauses]
+      required: [clauses, unverified_clauses]
       properties:
         clauses:
           type: array
+          description: >-
+            Clauses whose quote was found in the pages supplied. The page
+            number is where it was actually found, not where the model said.
           items:
             type: object
             required: [clause_type, text_quote, page_number, confidence_score]
@@ -80,12 +93,40 @@ capabilities:
               page_number:
                 type: integer
                 minimum: 1
-                description: 1-indexed physical page (matching lease_pages) where this quote was found.
+                description: Page where this quote was found, offset by first_page_number.
               confidence_score:
                 type: number
                 minimum: 0
                 maximum: 1
                 description: How clearly the source text states this obligation, from 0.0 (uncertain) to 1.0 (explicit and unambiguous).
+        unverified_clauses:
+          type: array
+          description: >-
+            Clauses the model returned whose quote could not be found in the
+            pages supplied — usually a paraphrase. Reported rather than
+            dropped so that "no such clause" and "quote not verifiable" are
+            distinguishable. Do not cite these without checking the source.
+          items:
+            type: object
+            required: [clause_type, text_quote, page_number, claimed_page_number, confidence_score]
+            properties:
+              clause_type:
+                type: string
+                enum: [renewal, financial, maintenance]
+              text_quote:
+                type: string
+                description: What the model returned. NOT confirmed to appear in the source.
+              page_number:
+                type: "null"
+                description: Always null — nothing was verified, so no page can be asserted.
+              claimed_page_number:
+                type: integer
+                description: The page the model said it came from. Unconfirmed.
+              confidence_score:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: The model's own confidence, which says nothing about whether the quote is real.
 
   - name: calculate_deadline
     description: >-
