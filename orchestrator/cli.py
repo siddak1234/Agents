@@ -445,6 +445,21 @@ def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
             print(f"FAIL  {manifest.name}\n      {drift}", file=sys.stderr)
             continue
 
+        # A field the contract removed still decodes, so nothing at runtime
+        # complains — the agent just reports having called no model. That is
+        # a wrong claim arriving quietly, which is what a gate is for.
+        if result.stale_usage:
+            failed += 1
+            fields = ", ".join(f"usage.{f}" for f in result.stale_usage)
+            print(
+                f"FAIL  {manifest.name}\n"
+                f"      emits {fields}, which the contract removed — the envelope "
+                f"decodes as `model: null`, silently claiming no model was called.\n"
+                f"      Report `usage.model` instead; see docs/AGENT_PROTOCOL.md.",
+                file=sys.stderr,
+            )
+            continue
+
         print(f"ok    {manifest.name}  ({', '.join(manifest.capability_names)})")
     return 1 if failed else 0
 

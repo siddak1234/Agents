@@ -568,3 +568,49 @@ def test_a_windows_interpreter_path_still_yields_a_parseable_manifest() -> None:
 
     with pytest.raises(yaml.YAMLError):
         yaml.safe_load(f'command: ["{windows}", "agent_main.py"]\n')
+
+
+def test_a_stale_usage_field_is_named_rather_than_ignored():
+    """Lenient decode, loud gate.
+
+    `test_usage_reports_the_model_not_money` fixes the runtime behaviour: an
+    agent that never migrated still runs. But `model: null` reads as "called
+    no model", not "did not migrate", and an agent emitting `cost_micros`
+    reached a green review board once on exactly that ambiguity. Decoding
+    records the stale field so `agents check` can fail on it.
+    """
+    stale = CallResult.decode(
+        _envelope(usage={"input_tokens": 9, "output_tokens": 3, "cost_micros": 4200}),
+        capability="x",
+    )
+    assert stale.stale_usage == ("cost_micros",)
+    assert stale.usage.model is None  # still decodes; still lenient
+
+
+def test_a_migrated_agent_reports_no_stale_usage():
+    fresh = CallResult.decode(
+        _envelope(usage={"input_tokens": 9, "output_tokens": 3, "model": "claude-sonnet-5"}),
+        capability="x",
+    )
+    assert fresh.stale_usage == ()
+
+
+def test_check_fails_an_agent_still_emitting_a_removed_usage_field(stub, capsys):
+    """The gate that would have caught a stale agent before review, not after.
+
+    `usage.cost_micros` was replaced by `usage.model`. An agent that never
+    migrated still decodes — deliberately, see
+    `test_usage_reports_the_model_not_money` — but it then reports `model:
+    null`, which claims it called no model. Every gate passed on exactly that
+    branch once, so `check` has to be the thing that notices.
+    """
+    source = stub.workdir / "agent_main.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace('"model": "test-model"', '"cost_micros": 4200'),
+        encoding="utf-8",
+    )
+
+    assert main(["--root", str(stub.workdir.parent), "check"]) == 1
+    err = capsys.readouterr().err
+    assert "usage.cost_micros" in err
+    assert "stub-agent" in err
