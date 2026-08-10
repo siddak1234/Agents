@@ -11,8 +11,10 @@ agent — so the first test is literally that copy-and-rename, and it must fail.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -37,6 +39,17 @@ TEMPLATE_SRC = Path(__file__).resolve().parents[2] / TEMPLATE_DIR
 
 #: Read from the template so an edit there cannot silently invalidate the
 #: description-similarity tests below.
+<<<<<<< HEAD
+=======
+#:
+#: `encoding` is explicit because `read_text()` otherwise uses the machine's
+#: default, and the template description contains an em dash: under a non-UTF-8
+#: locale this import either raises `UnicodeDecodeError` or — on cp1252 — yields
+#: a mojibake description that silently defeats the containment check in
+#: `_too_close_to`, so the padded-template test passes while testing nothing.
+#: `orchestrator.manifest` has always read the same file with `encoding="utf-8"`;
+#: this line was the one that disagreed.
+>>>>>>> upstream/main
 TEMPLATE_DESCRIPTION: str = yaml.safe_load(
     (TEMPLATE_SRC / "agent.yaml").read_text(encoding="utf-8")
 )["description"]
@@ -558,3 +571,31 @@ def test_the_marker_scan_ignores_caches_and_virtualenvs(tmp_path: Path) -> None:
         path.write_text(f"# {TODO_MARKER}\n", encoding="utf-8")
 
     assert integration_problems(load_registry(root)) == []
+
+
+def test_this_module_imports_under_a_non_utf8_locale() -> None:
+    """The template description must not be read at the locale's mercy.
+
+    `read_text()` with no encoding uses the machine's default. The template
+    description contains an em dash, so under cp1252 this module imports a
+    mojibake description — and `_too_close_to` falls back from containment to
+    the similarity ratio, which the padded-template case is specifically
+    designed to slip past. The test above would then pass while testing
+    nothing. Under a C locale it fails louder, with UnicodeDecodeError, which
+    is what this reproduces. Reported by @ankur-15.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in {"LANG", "LC_CTYPE"}}
+    env |= {
+        "LC_ALL": "C",
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", "import orchestrator.tests.test_integration_checks"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr

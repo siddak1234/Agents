@@ -1,0 +1,163 @@
+protocol: agentcall/v1
+name: commercial-lease-agent
+description: >-
+  Extracts renewal, financial, and maintenance clauses from commercial lease
+  documents into structured JSON, with the exact source quote, the physical
+  page number, and a confidence score for each — replacing an hours-long
+  manual read-through with a single call. Separately, calculates a notice
+  deadline from a lease end date and a notice period the caller already has —
+  extraction returns quotes, not dates, so the two do not chain on their own.
+  Called by an orchestrator or script, not directly by a person; it does not
+  read PDF files itself, render output for a human, or store any lease it has
+  seen.
+
+runtime:
+  type: subprocess
+  command: ["uv", "run", "python", "agent_main.py"]
+  test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-q"]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
+  env:
+    inherit:
+      - "ANTHROPIC_API_KEY"
+      - "LEASE_AGENT_MODEL"
+      - "LEASE_AGENT_CHUNK_SIZE"
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities: { type: array, items: { type: object } }
+
+  - name: extract_clauses
+    description: >-
+      Extract renewal, financial, and maintenance clauses from a lease given
+      as an array of per-page text. Uses a language model with multi-shot
+      prompting and a tool schema for structured output. Returns each
+      clause's type, exact source quote, physical page number, and a
+      confidence score. Every clause in `clauses` has had its quote found in
+      the pages supplied; one that could not be located is reported in
+      `unverified_clauses` rather than dropped, so a caller can tell an absent
+      obligation from an unverifiable quote. Requires ANTHROPIC_API_KEY, and
+      returns `unavailable` rather than failing when it is absent.
+    input_schema:
+      type: object
+      required: [lease_pages]
+      properties:
+        lease_pages:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: { type: string }
+          description: >-
+            Raw text of each physical page, in order; index 0 is the page
+            numbered first_page_number. At most 1000 pages and 4,000,000
+            characters in total — that is what one request costs — so a
+            longer document is split by the caller.
+        first_page_number:
+          type: integer
+          minimum: 1
+          default: 1
+          description: >-
+            The real page number of lease_pages[0]. Pass it when sending part
+            of a document, so returned page numbers refer to the whole lease
+            rather than to the slice.
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [clauses, unverified_clauses]
+      properties:
+        clauses:
+          type: array
+          description: >-
+            Clauses whose quote was found in the pages supplied. The page
+            number is where it was actually found, not where the model said.
+          items:
+            type: object
+            required: [clause_type, text_quote, page_number, confidence_score]
+            properties:
+              clause_type:
+                type: string
+                enum: [renewal, financial, maintenance]
+                description: Which of the three tracked categories this clause belongs to.
+              text_quote:
+                type: string
+                description: Exact text copied verbatim from the source page. Never paraphrased or summarized.
+              page_number:
+                type: integer
+                minimum: 1
+                description: Page where this quote was found, offset by first_page_number.
+              confidence_score:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: >-
+                  The model's own stated confidence that the source text
+                  clearly states this obligation, from 0.0 (uncertain) to 1.0
+                  (explicit and unambiguous) — self-reported, not
+                  independently audited. Verification (see `page_number`)
+                  only confirms the quote exists in the source; it says
+                  nothing about whether this number is calibrated.
+        unverified_clauses:
+          type: array
+          description: >-
+            Clauses the model returned whose quote could not be found in the
+            pages supplied — usually a paraphrase. Reported rather than
+            dropped so that "no such clause" and "quote not verifiable" are
+            distinguishable. Do not cite these without checking the source.
+          items:
+            type: object
+            required: [clause_type, text_quote, page_number, claimed_page_number, confidence_score]
+            properties:
+              clause_type:
+                type: string
+                enum: [renewal, financial, maintenance]
+              text_quote:
+                type: string
+                description: What the model returned. NOT confirmed to appear in the source.
+              page_number:
+                type: "null"
+                description: Always null — nothing was verified, so no page can be asserted.
+              claimed_page_number:
+                type: integer
+                description: The page the model said it came from. Unconfirmed.
+              confidence_score:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: The model's own confidence, which says nothing about whether the quote is real.
+
+  - name: calculate_deadline
+    description: >-
+      Calculate the notice deadline given a lease end date and a notice
+      period in days. Pure date arithmetic, no external dependency, callable
+      on its own.
+    input_schema:
+      type: object
+      required: [lease_end_date, notice_period_days]
+      properties:
+        lease_end_date:
+          type: string
+          format: date
+          description: The lease's end date, in YYYY-MM-DD format.
+        notice_period_days:
+          type: integer
+          minimum: 0
+          description: Number of days of notice required before lease_end_date.
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [deadline_date]
+      properties:
+        deadline_date:
+          type: string
+          format: date
+          description: The date notice_period_days before lease_end_date, in YYYY-MM-DD format.

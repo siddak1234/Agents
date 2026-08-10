@@ -1,0 +1,152 @@
+# Manifest for the Operations Maintenance Agent.
+#
+# This agent is registered in the repository and follows the
+# agentcall/v1 protocol.
+
+protocol: agentcall/v1
+
+name: operations-maintenance-agent
+
+description: Generates an optimized refinery maintenance plan from operational constraints, balancing safety, production, technician availability, and equipment health.
+
+runtime:
+  type: subprocess
+
+  command: ["uv", "run", "python", "agent_main.py"]
+
+  test: ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tests"]
+
+  # Ruff and its configuration are this agent's own (see pyproject.toml and
+  # ruff.toml beside this file). `compileall` only proves the source parses.
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
+
+  # Only expose the environment variables this agent actually needs.
+  env:
+    inherit:
+      - ANTHROPIC_API_KEY
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities.
+
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+
+    output_schema:
+      type: object
+      required:
+        - name
+        - protocol
+        - capabilities
+
+      properties:
+        name:
+          type: string
+
+        protocol:
+          type: string
+
+        capabilities:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - description
+
+            properties:
+              name:
+                type: string
+
+              description:
+                type: string
+
+  - name: generate_maintenance_plan
+    description: Generate an optimized refinery maintenance plan from the provided operational constraints.
+
+    input_schema:
+      type: object
+
+      required:
+        - work_orders
+        - equipment_status
+        - technicians
+        - production_constraints
+
+      properties:
+
+        work_orders:
+          type: array
+          description: List of maintenance work orders.
+          items:
+            type: object
+
+        equipment_status:
+          type: array
+          description: Current health and operating status of refinery equipment.
+          items:
+            type: object
+
+        technicians:
+          type: array
+          description: Available technicians with skills and shift details.
+          items:
+            type: object
+
+        production_constraints:
+          type: object
+          description: Production targets and operational limitations.
+
+        spare_parts:
+          type: array
+          description: Available spare parts inventory.
+          items:
+            type: object
+
+        shift_details:
+          type: object
+          description: Information about the planning shift.
+
+      additionalProperties: false
+
+    output_schema:
+      type: object
+
+      required:
+        - plan_summary
+        - scheduled_tasks
+        - deferred_tasks
+        - risks
+        - recommendations
+
+      properties:
+
+        plan_summary:
+          type: string
+          description: High-level summary of the selected maintenance plan.
+
+        scheduled_tasks:
+          type: array
+          description: Maintenance tasks selected for execution.
+          items:
+            type: object
+
+        deferred_tasks:
+          type: array
+          description: Tasks postponed together with the reason.
+          items:
+            type: object
+
+        risks:
+          type: array
+          description: Operational risks considered during planning.
+          items:
+            type: object
+
+        recommendations:
+          type: array
+          description: Suggestions for improving maintenance efficiency.
+          items:
+            type: object

@@ -1,0 +1,192 @@
+protocol: agentcall/v1
+name: investment-due-diligence
+description: >-
+  Evaluates residential real estate investment opportunities for the Indian
+  residential market (prices in INR) for individual investors and prospective
+  home buyers. Given a property's basic details (address or listing URL,
+  asking price, area), it builds a verified property profile, analyzes
+  financial attractiveness, assesses the location's infrastructure and growth
+  outlook, identifies risks, and returns an evidence-backed BUY / NEGOTIATE /
+  REJECT recommendation with a confidence score. It does not place bids, file
+  paperwork, or evaluate commercial or non-residential property.
+
+runtime:
+  type: subprocess
+  command: ["uv", "run", "--frozen", "python", "agent_main.py"]
+  test: ["uv", "run", "--frozen", "--extra", "dev", "python", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
+  env:
+    inherit: ["ANTHROPIC_API_KEY"]
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  - name: property_intelligence
+    description: >-
+      Builds a verified property profile from a listing URL and/or address,
+      asking price, and area. Researches the listing with Claude's web search to establish builder,
+      type and locality. Fails invalid_request if the property cannot be
+      identified, or if it looks non-residential.
+    input_schema:
+      type: object
+      properties:
+        property_url: { type: string }
+        address: { type: string }
+        asking_price_inr: { type: number, exclusiveMinimum: 0 }
+        area_sqft: { type: number, exclusiveMinimum: 0 }
+        builder_hint: { type: string }
+      additionalProperties: true
+    output_schema:
+      type: object
+      required: [property_id, property_type, location]
+      properties:
+        property_id: { type: string }
+        builder: { type: [string, "null"] }
+        property_type: { type: string }
+        configuration: { type: [string, "null"] }
+        location: { type: string }
+        price_per_sqft: { type: [number, "null"] }
+
+  - name: financial_analysis
+    description: >-
+      Evaluates the property's financial attractiveness: market position
+      versus comparable pricing, estimated rental yield, and estimated ROI,
+      via Claude with web search. Only 'location' is required -- price can
+      be supplied as 'price_per_sqft' directly, or derived from
+      'asking_price_inr' + 'area_sqft', or omitted entirely. Scores are
+      0-10. market_value/premium_percent come back null -- never a guess --
+      whenever the comparison cannot be made: no price supplied, or no
+      comparable rate found in the search results. Yield and ROI are still
+      estimated from location alone. Fails unavailable if ANTHROPIC_API_KEY
+      is unset or Claude is unreachable.
+    input_schema:
+      type: object
+      required: [location]
+      properties:
+        location: { type: string }
+        price_per_sqft: { type: number, exclusiveMinimum: 0 }
+        asking_price_inr: { type: number, exclusiveMinimum: 0 }
+        area_sqft: { type: number, exclusiveMinimum: 0 }
+      additionalProperties: true
+    output_schema:
+      type: object
+      required: [financial_score]
+      properties:
+        market_value: { type: [string, "null"] }
+        premium_percent: { type: [number, "null"] }
+        estimated_rental_yield_percent: { type: number }
+        estimated_roi_percent: { type: number }
+        financial_score: { type: number, minimum: 0, maximum: 10 }
+
+  - name: location_infrastructure_analysis
+    description: >-
+      Assesses connectivity, amenities, planned infrastructure, and
+      long-term growth potential of the property's locality, researched
+      with Claude's web search. Fails unavailable if ANTHROPIC_API_KEY is
+      unset or Claude is unreachable. Coordinates are approximate and come
+      back null when they cannot be established.
+    input_schema:
+      type: object
+      required: [location]
+      properties:
+        location: { type: string }
+      additionalProperties: true
+    output_schema:
+      type: object
+      required: [location_score]
+      properties:
+        connectivity_score: { type: number, minimum: 0, maximum: 10 }
+        amenities_score: { type: number, minimum: 0, maximum: 10 }
+        growth_potential: { type: string }
+        planned_infrastructure: { type: array, items: { type: string } }
+        location_score: { type: number, minimum: 0, maximum: 10 }
+        coordinates:
+          type: [object, "null"]
+          properties:
+            latitude: { type: number }
+            longitude: { type: number }
+
+  - name: risk_assessment
+    description: >-
+      Identifies builder/legal, environmental, and market risks for the
+      property, researched with Claude's web search over builder track
+      record and locality news. Only 'location' is required -- 'builder' and 'property_type'
+      sharpen the assessment when supplied but are optional; their
+      absence is itself noted as a limitation in identified_risks rather
+      than rejected. Fails unavailable if ANTHROPIC_API_KEY is unset or
+      Claude is unreachable.
+    input_schema:
+      type: object
+      required: [location]
+      properties:
+        builder: { type: [string, "null"] }
+        location: { type: string }
+        property_type: { type: [string, "null"] }
+      additionalProperties: true
+    output_schema:
+      type: object
+      required: [overall_risk]
+      properties:
+        builder_legal_risk: { type: string }
+        environmental_risk: { type: string }
+        market_risk: { type: string }
+        overall_risk: { type: string }
+        identified_risks: { type: array, items: { type: string } }
+
+  - name: investment_recommendation
+    description: >-
+      Synthesizes whatever evidence the caller has into a final
+      BUY / NEGOTIATE / REJECT recommendation with a confidence score,
+      using Claude for reasoning. Nothing is strictly
+      required: pass the raw output objects from any of the other
+      capabilities (property_intelligence, financial_analysis,
+      location_infrastructure_analysis, risk_assessment) and/or the
+      convenience shortcuts (financial_score, location_score,
+      overall_risk) for whichever ones you have -- the model reasons
+      over whatever subset is present and calls out what's missing. The
+      answer arrives through a forced tool call whose schema mirrors this
+      capability's output schema, so a recommendation is either the
+      model's own or an error -- never a default standing in for one.
+      Fails invalid_request if no evidence at all is supplied. Fails
+      unavailable if ANTHROPIC_API_KEY is unset, Claude is unreachable, or the
+      model's answer carries no usable recommendation.
+    input_schema:
+      type: object
+      properties:
+        property_intelligence: { type: object }
+        financial_analysis: { type: object }
+        location_infrastructure_analysis: { type: object }
+        risk_assessment: { type: object }
+        financial_score: { type: number, minimum: 0, maximum: 10 }
+        location_score: { type: number, minimum: 0, maximum: 10 }
+        overall_risk: { type: string, enum: [Low, Medium, High] }
+        asking_price_inr: { type: number }
+      additionalProperties: true
+    output_schema:
+      type: object
+      required: [recommendation, confidence_percent]
+      properties:
+        recommendation: { type: string, enum: [BUY, NEGOTIATE, REJECT] }
+        confidence_percent: { type: number, minimum: 0, maximum: 100 }
+        key_strengths: { type: array, items: { type: string } }
+        key_concerns: { type: array, items: { type: string } }
+        recommended_offer_price_inr: { type: [number, "null"] }

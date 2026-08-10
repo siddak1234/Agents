@@ -1,0 +1,139 @@
+# How the repository orchestrator calls this agent.
+# Contract: docs/AGENT_PROTOCOL.md at the repository root.
+#
+# This file belongs to the agent, not to the orchestrator. Nothing here
+# depends on the orchestrator existing — the folder still works copied out
+# of this repository.
+
+protocol: agentcall/v1
+name: realty-lead-gen
+description: >-
+  Grades property condition from listing photos on the Fannie Mae UAD scale
+  and estimates a rehab range, using Claude vision. The full lead-generation
+  service this grew out of lives in its own repository.
+
+runtime:
+  type: subprocess
+  # Run through `uv` so the agent uses its own locked environment. The
+  # working directory is always this file's folder, which is what makes
+  # `.env` resolve; the orchestrator sets it and it is not configurable here.
+  command: ["uv", "run", "python", "-m", "realty_lead_gen.agentcall"]
+
+  # `--extra dev` is what carries pytest. The command must stand up on a
+  # machine that has only ever run `uv sync --frozen` here, because that is
+  # what CI does before calling it — leave it off and the orchestrator reports
+  # a test failure that is really a missing interpreter dependency.
+  test: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-m", "unit", "-q"]
+
+  # The same checks `make lint` runs. Root tooling covers root-owned code
+  # only, so this is what actually gets this agent's source linted and
+  # type-checked by `agents lint` and by CI.
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "make", "lint"]
+
+  # Least privilege: this agent sees only what is named here, plus the base
+  # variables every process needs (PATH, HOME, ...). Everything else in the
+  # orchestrator's environment is withheld.
+  #
+  # Photo grading needs Claude and nothing more. When this folder still held
+  # the whole service the list was longer; the split is what made it this
+  # short, and the review board blocks widening it past what a capability
+  # actually reads.
+  env:
+    inherit:
+      - ANTHROPIC_API_KEY
+      - ANTHROPIC_MODEL_* # vision model selection
+      - APP_LOG_LEVEL
+      - APP_LOG_FORMAT
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  - name: grade_photos
+    description: >-
+      Grade property photos on the Fannie Mae UAD 3.6 condition scale and
+      estimate a rehab range. One Claude vision call; batches of roughly ten
+      photos. Requires ANTHROPIC_API_KEY, and returns an `unavailable` error
+      rather than failing when it is absent.
+    input_schema:
+      type: object
+      required: [photo_urls]
+      properties:
+        photo_urls:
+          type: array
+          minItems: 1
+          items: { type: string, format: uri }
+          description: Publicly reachable image URLs.
+        market_hint:
+          type: string
+          description: Free-text market context, e.g. "Austin, TX".
+      additionalProperties: false
+    output_schema:
+      type: object
+      required:
+        [overall_condition, overall_confidence, rehab_total_low_cents,
+         rehab_total_high_cents, systems, red_flags]
+      properties:
+        overall_condition:
+          type: string
+          enum: [C1, C2, C3, C4, C5, C6, NEEDS_HUMAN_REVIEW]
+          description: >-
+            UAD grade C1 through C6, or NEEDS_HUMAN_REVIEW when
+            overall_confidence is below 0.6 — the grader declining to grade
+            rather than a seventh point on the scale. Route it to a person.
+        overall_confidence: { type: number, minimum: 0, maximum: 1 }
+        # Money is integer cents everywhere in this agent — see CLAUDE.md.
+        rehab_total_low_cents: { type: integer }
+        rehab_total_high_cents: { type: integer }
+        systems:
+          type: array
+          items:
+            type: object
+            properties:
+              system: { type: string }
+              condition_grade:
+                type: string
+                enum: [C1, C2, C3, C4, C5, C6, NOT_VISIBLE]
+              observations: { type: string }
+              repair_items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    item: { type: string }
+                    scope: { type: string }
+                    # Cents here too. The model is asked for dollars because
+                    # that is what it reasons in; the conversion happens before
+                    # anything reaches the wire.
+                    cost_low_cents: { type: integer }
+                    cost_high_cents: { type: integer }
+                    confidence: { type: number, minimum: 0, maximum: 1 }
+                    evidence_photo_ids: { type: array, items: { type: integer } }
+        red_flags:
+          type: array
+          description: >-
+            Empty, or the flags that apply. The literal ["none"] also means no
+            flags — treat it as empty rather than as a flag named "none".
+          items:
+            type: string
+            enum: [foundation, roof, water_damage, mold, fire_damage, structural, none]
+        notes_for_reviewer: { type: [string, "null"] }
+        model: { type: string }

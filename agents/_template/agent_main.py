@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """A minimal agentcall/v1 agent. Copy this folder to start a new agent.
 
+TODO(new agent): rewrite this docstring for your agent. Every sentence below
+is about the template and stops being true the moment you add a dependency —
+"standard library only" first of all. It is the one piece of prose in this
+folder a reader takes at face value, and on the last agent added here it
+survived two rounds of review, still describing a file it no longer matched.
+
 Standard library only, on purpose: you can run it right now, and it shows the
 whole contract in one screen. A real agent brings its own dependencies (see
 `realty-lead-gen`), but nothing here requires them.
@@ -44,11 +50,16 @@ def main() -> int:
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
 
+    raw = sys.stdin.read()
     try:
-        envelope = dispatch(sys.stdin.read())
+        envelope = dispatch(raw)
     except Exception as exc:  # noqa: BLE001 — an envelope is mandatory
         traceback.print_exc(file=sys.stderr)
-        envelope = fail("", "internal", f"{type(exc).__name__}: {exc}")
+        # Name the capability even here. An unanticipated failure is exactly
+        # when the caller most needs to know which call broke, and `""` tells
+        # them nothing — a caller running several capabilities cannot even
+        # tell which result this is.
+        envelope = fail(_requested_capability(raw), "internal", f"{type(exc).__name__}: {exc}")
     finally:
         sys.stdout = real_stdout
 
@@ -66,6 +77,21 @@ def main() -> int:
 # Many returns on purpose: each branch is one validation failure or one
 # capability. Collapsing them into a single result variable would hide which
 # check rejected the request, which is the only thing a caller wants to know.
+def _requested_capability(raw: str) -> str:
+    """The capability the request named, for an error raised before dispatch
+    could report one itself.
+
+    Best effort by design: a request too malformed to read a capability out of
+    is one whose capability is genuinely unknown, and `""` is then the honest
+    answer rather than a placeholder.
+    """
+    try:
+        value = json.loads(raw).get("capability")
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return ""
+    return value if isinstance(value, str) else ""
+
+
 def dispatch(raw: str) -> dict[str, Any]:  # noqa: PLR0911
     try:
         request = json.loads(raw or "{}")
@@ -139,7 +165,7 @@ def fail(capability: str, etype: str, message: str, *, retryable: bool = False):
 
 
 def zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost_micros": 0}
+    return {"input_tokens": 0, "output_tokens": 0, "model": None}
 
 
 if __name__ == "__main__":

@@ -22,7 +22,14 @@ import pytest
 
 from orchestrator import manifest as manifest_mod
 from orchestrator.contract import PROTOCOL, CallRequest
-from orchestrator.discovery import AGENTS_DIR, SKIP_DIRS, TEMPLATE_DIR, load_registry, repo_root
+from orchestrator.discovery import (
+    AGENTS_DIR,
+    SKIP_DIRS,
+    TEMPLATE_DIR,
+    TODO_MARKER,
+    load_registry,
+    repo_root,
+)
 from orchestrator.runner import call, describe
 
 TEMPLATE = repo_root() / TEMPLATE_DIR
@@ -83,6 +90,39 @@ def test_runs_without_the_orchestrator(template):
     )
     # stdout must be exactly one JSON object — nothing else, no log lines.
     assert json.loads(proc.stdout)["ok"] is True
+
+
+def test_an_unanticipated_failure_still_names_the_capability():
+    """`fail("", ...)` was copied out of here into every agent in the repo.
+
+    A caller driving several capabilities cannot tell which one this envelope
+    answers, and the empty string reads as "no capability was requested" —
+    which is not what happened. Reproduced against the template rather than
+    any one agent, because the template is where it came from.
+    """
+    request = json.dumps({"protocol": PROTOCOL, "capability": "greet", "input": {"name": "Dak"}})
+    proc = subprocess.run(
+        [sys.executable, "-c", CRASHING_TEMPLATE],
+        cwd=TEMPLATE,
+        input=request,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    envelope = json.loads(proc.stdout)
+    assert envelope["ok"] is False
+    assert envelope["error"]["type"] == "internal"
+    assert envelope["capability"] == "greet"
+
+
+# Import agent_main, break dispatch, and run main() — the only way to reach
+# the top-level catch-all, which nothing else can trigger by design.
+CRASHING_TEMPLATE = (
+    "import agent_main\n"
+    "agent_main.dispatch = lambda raw: (_ for _ in ()).throw(RuntimeError('boom'))\n"
+    "raise SystemExit(agent_main.main())\n"
+)
 
 
 def test_template_is_not_registered():
@@ -146,6 +186,29 @@ def test_neither_side_imports_the_other():
         p for p in _sources(root / "orchestrator") if agent_modules & _top_level_imports(p)
     ]
     assert not offenders, f"the orchestrator imports agent code: {offenders}"
+
+
+def test_the_docstring_carries_a_marker():
+    """Prose about the template needs the same tripwire as everything else.
+
+    `agent.yaml`, the starter test, README.md and the body of `agent_main.py`
+    all plant `TODO(new agent)`; the module docstring did not, and it is the
+    one piece of prose here a reader takes at face value. "Standard library
+    only, on purpose" is false the moment an agent adds a dependency, and on
+    the last agent added here it survived two rounds of review still saying so.
+
+    `integration_problems` already scans whole files, so the marker is the
+    whole fix — which is exactly why it can be deleted by accident while the
+    docstring is being reworded. This is what notices.
+    """
+    tree = ast.parse((TEMPLATE / "agent_main.py").read_text(encoding="utf-8"))
+    docstring = ast.get_docstring(tree)
+
+    assert docstring is not None, "agent_main.py lost its module docstring"
+    assert TODO_MARKER in docstring, (
+        "the template's module docstring has no TODO(new agent) marker, so a "
+        "copy that leaves it verbatim passes `agents list --strict`"
+    )
 
 
 def test_a_copy_becomes_a_real_agent(tmp_path):

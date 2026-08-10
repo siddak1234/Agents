@@ -1,0 +1,39 @@
+# Ruff configuration for this agent. Root tooling deliberately lints
+# root-owned code only (see pyproject.toml at the repository root), so this is
+# what actually keeps this agent's source clean via `agents lint`.
+#
+# Without this file ruff walks up and uses the root's configuration, which
+# works only while the folder sits inside this repository — the same coupling
+# the pyproject.toml beside this file removes for the dependency.
+
+cache-dir = ".cache/ruff"
+line-length = 100
+target-version = "py313"
+
+[lint]
+# Same selection as the repository root.
+select = [
+    "E", "W", "F", "I", "UP", "B", "BLE", "SIM", "N", "RUF",
+    "S", "DTZ", "PL", "TRY", "PERF", "LOG",
+]
+ignore = [
+    "E501",    # line length is the formatter's job
+    "TRY003",  # long exception messages are the point — they name the field
+    "TRY004",  # ValueError maps to invalid_request; TypeError would become internal
+    "PLR2004", # scoring thresholds and keyword rubrics are deliberate literals
+    "PLR0913", # recommend/_build_evidence take one arg per evidence channel
+    "S310",    # urllib to fixed https endpoints (Tavily/Groq/Nominatim)
+    "S324",    # sha1 used only to mint a short non-crypto property_id
+]
+
+[lint.per-file-ignores]
+# Tests assert on literals and run the agent as a subprocess by design.
+"tests/*" = ["S101", "S603", "S607", "PLR2004", "PLW1510"]
+# Lazy capability imports keep `describe` free of analysis/recommendation
+# dependencies (agent_main.py RULE 6). The dispatch returns many typed
+# envelopes by design — folding them would obscure the protocol shape.
+"agent_main.py" = ["PLC0415", "PLR0911", "PLR0912"]
+# The Anthropic SDK is imported inside the call, not at module load, so
+# `describe` answers on a machine that cannot satisfy this agent's runtime
+# and a missing key never becomes an import-time crash (RULE 3, RULE 5).
+"clients.py" = ["PLC0415"]

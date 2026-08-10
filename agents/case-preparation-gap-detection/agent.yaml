@@ -1,0 +1,112 @@
+protocol: agentcall/v1
+name: case-preparation-gap-detection
+description: >-
+  Reads a litigation case's documents (FIR, witness statements, medical and
+  forensic reports, charge sheets) and returns a structured report of
+  preparation gaps for a lawyer or litigation team preparing to file. It flags
+  missing evidence expected by the case's own facts, timeline inconsistencies
+  across documents, and an overall readiness score. It does not judge the
+  case, decide guilt or innocence, or recommend legal strategy.
+
+runtime:
+  type: subprocess
+  command: ["python3", "agent_main.py"]
+  test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["uv", "run", "--frozen", "--extra", "dev", "ruff", "check", "."]
+  env:
+    inherit: []
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities: { type: array, items: { type: object } }
+
+  - name: review_case
+    description: >-
+      Analyse a set of case documents and return a readiness score, missing
+      evidence flags, and timeline inconsistencies. Rule-based only — no
+      model calls, no external dependencies.
+    input_schema:
+      type: object
+      required: [documents]
+      additionalProperties: false
+      properties:
+        documents:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [id, text]
+            additionalProperties: false
+            properties:
+              id:
+                type: string
+                description: Caller-assigned identifier for the document
+              text:
+                type: string
+                description: Raw document text
+    output_schema:
+      type: object
+      required:
+        - readiness_score
+        - document_classification
+        - timeline
+        - timeline_issues
+        - missing_evidence
+        - recommendations
+      properties:
+        readiness_score:
+          type: integer
+          description: "Overall case preparation readiness, 0-100"
+        document_classification:
+          type: array
+          items:
+            type: object
+            required: [id, type, confidence]
+            properties:
+              id: { type: string }
+              type:
+                type: string
+                description: "e.g. fir, medical_report, witness_statement, charge_sheet, forensic_report, other"
+              confidence: { type: number }
+        timeline:
+          type: array
+          items:
+            type: object
+            required: [date, event, source_doc]
+            properties:
+              date: { type: string, description: "ISO 8601, YYYY-MM-DD" }
+              event: { type: string }
+              source_doc: { type: string }
+        timeline_issues:
+          type: array
+          items:
+            type: object
+            required: [type, description, docs]
+            properties:
+              type: { type: string, description: "e.g. date_conflict, missing_date" }
+              description: { type: string }
+              docs: { type: array, items: { type: string } }
+        missing_evidence:
+          type: array
+          items:
+            type: object
+            required: [expected, reason, triggered_by, matched]
+            properties:
+              expected: { type: string }
+              reason: { type: string }
+              triggered_by: { type: array, items: { type: string } }
+              matched: { type: string }
+        recommendations:
+          type: array
+          items: { type: string }

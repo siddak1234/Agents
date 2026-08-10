@@ -1,0 +1,48 @@
+{
+  "name": "record_investment_recommendation",
+  "description": "Record the final BUY / NEGOTIATE / REJECT call for this residential property, with the evidence that drove it.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "recommendation": {
+        "type": "string",
+        "enum": [
+          "BUY",
+          "NEGOTIATE",
+          "REJECT"
+        ],
+        "description": "The investment call."
+      },
+      "confidence_percent": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "How confident the call is, lowered in proportion to whatever evidence was missing."
+      },
+      "key_strengths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Short points in the property's favour."
+      },
+      "key_concerns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Short points against it. Name any evidence gaps here."
+      },
+      "recommended_offer_price_inr": {
+        "type": "number",
+        "description": "Offer to counter with, in INR. Omit unless an asking price was supplied."
+      }
+    },
+    "required": [
+      "recommendation",
+      "confidence_percent",
+      "key_strengths",
+      "key_concerns"
+    ]
+  }
+}

@@ -18,6 +18,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from orchestrator import runner as runner_mod
 from orchestrator.cli import main
@@ -33,7 +34,7 @@ import json, os, sys, time
 P = "agentcall/v1"
 def env(ok, cap, out=None, err=None):
     return {"protocol": P, "ok": ok, "capability": cap, "output": out,
-            "usage": {"input_tokens": 1, "output_tokens": 2, "cost_micros": 3},
+            "usage": {"input_tokens": 1, "output_tokens": 2, "model": "test-model"},
             "error": err}
 real = sys.stdout
 sys.stdout = sys.stderr
@@ -69,6 +70,22 @@ json.dump(e, real)
 real.write("\\n")
 """
 
+
+def _yaml_scalar(text: str) -> str:
+    """Escape `text` for interpolation into a double-quoted YAML scalar.
+
+    A double-quoted scalar processes escape sequences, so a Windows
+    interpreter path — `C:\\Users\\...\\python.exe` — makes `\\U` the start of a
+    32-bit unicode escape and the manifest fails to parse before any test
+    runs. JSON string escaping is a subset of YAML's, so `json.dumps` produces
+    a scalar that round-trips on every platform; on POSIX it is a no-op.
+    """
+    return json.dumps(text)[1:-1]
+
+
+EXE = _yaml_scalar(sys.executable)
+
+
 CAPS = ["describe", "echo", "where", "environment", "flood", "leak_stdout", "crash", "hang"]
 
 
@@ -87,9 +104,15 @@ def stub(tmp_path: Path):
             description: Stub agent for transport tests.
             runtime:
               type: subprocess
+<<<<<<< HEAD
               command: ["{PYTHON_EXE}", "agent_main.py"]
               test: ["{PYTHON_EXE}", "-c", "pass"]
               lint: ["{PYTHON_EXE}", "-c", "pass"]
+=======
+              command: ["{EXE}", "agent_main.py"]
+              test: ["{EXE}", "-c", "pass"]
+              lint: ["{EXE}", "-c", "pass"]
+>>>>>>> upstream/main
               env:
                 inherit: [STUB_ALLOWED, STUB_PREFIXED_*]
             capabilities:
@@ -108,7 +131,7 @@ def test_describe_round_trips(stub):
     result = describe(stub)
     assert result.ok
     assert result.output["name"] == "stub-agent"
-    assert result.usage.cost_micros == 3
+    assert result.usage.model == "test-model"
 
 
 def test_input_reaches_the_agent(stub):
@@ -343,9 +366,13 @@ def test_agents_lint_runs_the_declared_command(stub, capsys):
 def test_an_agent_declaring_no_lint_command_fails(stub, capsys):
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
+<<<<<<< HEAD
         manifest.read_text(encoding="utf-8").replace(
             f'  lint: ["{PYTHON_EXE}", "-c", "pass"]\n', ""
         ),
+=======
+        manifest.read_text(encoding="utf-8").replace(f'  lint: ["{EXE}", "-c", "pass"]\n', ""),
+>>>>>>> upstream/main
         encoding="utf-8",
     )
     assert main(["--root", str(stub.workdir.parent), "lint"]) == 1
@@ -356,9 +383,13 @@ def test_an_agent_declaring_no_test_command_fails(stub, capsys):
     """Tests nothing can run are tests nobody runs."""
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
+<<<<<<< HEAD
         manifest.read_text(encoding="utf-8").replace(
             f'  test: ["{PYTHON_EXE}", "-c", "pass"]\n', ""
         ),
+=======
+        manifest.read_text(encoding="utf-8").replace(f'  test: ["{EXE}", "-c", "pass"]\n', ""),
+>>>>>>> upstream/main
         encoding="utf-8",
     )
     assert main(["--root", str(stub.workdir.parent), "test"]) == 1
@@ -386,8 +417,13 @@ def test_the_test_command_gets_the_same_environment_a_call_gets(stub, monkeypatc
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
+<<<<<<< HEAD
             f'  test: ["{PYTHON_EXE}", "-c", "pass"]',
             f'  test: ["{PYTHON_EXE}", "probe.py"]',
+=======
+            f'  test: ["{EXE}", "-c", "pass"]',
+            f'  test: ["{EXE}", "probe.py"]',
+>>>>>>> upstream/main
         ),
         encoding="utf-8",
     )
@@ -446,7 +482,7 @@ def _envelope(**overrides) -> str:
         "ok": True,
         "capability": "x",
         "output": {"n": 1},
-        "usage": {"input_tokens": 5, "output_tokens": 6, "cost_micros": 7},
+        "usage": {"input_tokens": 5, "output_tokens": 6, "model": "test-model"},
         "error": None,
     }
     body.update(overrides)
@@ -494,10 +530,35 @@ def test_a_negative_usage_count_is_rejected():
         CallResult.decode(_envelope(usage={"input_tokens": -1}), capability="x")
 
 
+def test_usage_reports_the_model_not_money():
+    """The contract carries `model`; a stale `cost_micros` is not a model.
+
+    An agent that never migrated still decodes -- it just reports having
+    called no model, which is what `model: null` says. The failure mode is
+    an honest absence, not a wrong number, which is the whole point of the
+    change (docs/AGENT_PROTOCOL.md).
+    """
+    stale = CallResult.decode(
+        _envelope(usage={"input_tokens": 9, "output_tokens": 3, "cost_micros": 4200}),
+        capability="x",
+    )
+    assert stale.usage.model is None
+    assert stale.usage.input_tokens == 9
+    assert not hasattr(stale.usage, "cost_micros")
+
+
+def test_usage_model_must_be_a_string_or_null():
+    with pytest.raises(ProtocolError, match=r"usage\.model"):
+        CallResult.decode(
+            _envelope(usage={"input_tokens": 0, "output_tokens": 0, "model": 7}),
+            capability="x",
+        )
+
+
 def test_usage_may_report_zeros_when_nothing_was_spent():
     """The whole point of mandatory accounting is that zero is a real answer."""
     result = CallResult.decode(_envelope(usage={}), capability="x")
-    assert (result.usage.input_tokens, result.usage.cost_micros) == (0, 0)
+    assert (result.usage.input_tokens, result.usage.model) == (0, None)
 
 
 def test_an_agent_cannot_emit_a_transport_error():
@@ -515,3 +576,111 @@ def test_an_agent_cannot_emit_a_transport_error():
     assert result.error.type == "internal"
     assert "transport" in result.error.message
     assert "spoofed" in result.error.message, "the agent's own text must survive"
+
+
+def test_a_windows_interpreter_path_still_yields_a_parseable_manifest() -> None:
+    """The stub manifest has to parse whatever `sys.executable` looks like.
+
+    Interpolated raw into a double-quoted scalar, a Windows interpreter path
+    fails on `\\U`, and every test in this file would fail on Windows and
+    nowhere else — a whole platform's worth of coverage lost to a quoting bug
+    in a fixture. Reported by @ankur-15.
+    """
+    windows = r"C:\Users\a\AppData\Local\Programs\Python\Python313\python.exe"
+
+    parsed = yaml.safe_load(f'command: ["{_yaml_scalar(windows)}", "agent_main.py"]\n')
+    assert parsed["command"][0] == windows
+
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(f'command: ["{windows}", "agent_main.py"]\n')
+
+
+def test_a_stale_usage_field_is_named_rather_than_ignored():
+    """Lenient decode, loud gate.
+
+    `test_usage_reports_the_model_not_money` fixes the runtime behaviour: an
+    agent that never migrated still runs. But `model: null` reads as "called
+    no model", not "did not migrate", and an agent emitting `cost_micros`
+    reached a green review board once on exactly that ambiguity. Decoding
+    records the stale field so `agents check` can fail on it.
+    """
+    stale = CallResult.decode(
+        _envelope(usage={"input_tokens": 9, "output_tokens": 3, "cost_micros": 4200}),
+        capability="x",
+    )
+    assert stale.stale_usage == ("cost_micros",)
+    assert stale.usage.model is None  # still decodes; still lenient
+
+
+def test_a_migrated_agent_reports_no_stale_usage():
+    fresh = CallResult.decode(
+        _envelope(usage={"input_tokens": 9, "output_tokens": 3, "model": "claude-sonnet-5"}),
+        capability="x",
+    )
+    assert fresh.stale_usage == ()
+
+
+def test_check_fails_an_agent_still_emitting_a_removed_usage_field(stub, capsys):
+    """The gate that would have caught a stale agent before review, not after.
+
+    `usage.cost_micros` was replaced by `usage.model`. An agent that never
+    migrated still decodes — deliberately, see
+    `test_usage_reports_the_model_not_money` — but it then reports `model:
+    null`, which claims it called no model. Every gate passed on exactly that
+    branch once, so `check` has to be the thing that notices.
+    """
+    source = stub.workdir / "agent_main.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace('"model": "test-model"', '"cost_micros": 4200'),
+        encoding="utf-8",
+    )
+
+    assert main(["--root", str(stub.workdir.parent), "check"]) == 1
+    err = capsys.readouterr().err
+    assert "usage.cost_micros" in err
+    assert "stub-agent" in err
+
+
+def test_verify_and_check_agree_on_a_stale_usage_field(stub, capsys):
+    """The two gates must not diverge — one used to have a check the other lacked.
+
+    `agents check` gained the stale-usage check in #28 and `agents verify`'s copy
+    of the same gate did not, so `verify` printed `ok  agents check` on a tree
+    where `agents check` exited 1. A contributor sees green and CI goes red,
+    which is the split test_verify.py exists to prevent.
+    """
+    source = stub.workdir / "agent_main.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace('"model": "test-model"', '"cost_micros": 4200'),
+        encoding="utf-8",
+    )
+    root = str(stub.workdir.parent)
+
+    assert main(["--root", root, "check"]) == 1
+    check_err = capsys.readouterr().err
+    assert "usage.cost_micros" in check_err
+
+    # Same tree, same gate, through verify. It must not report ok.
+    assert main(["--root", root, "verify", "stub-agent"]) != 0
+    verify_out = capsys.readouterr().out
+    check_line = next(ln for ln in verify_out.splitlines() if "agents check" in ln)
+    assert check_line.strip().startswith("FAIL"), f"verify disagreed with check: {check_line!r}"
+
+
+def test_an_empty_capability_falls_back_to_the_one_requested():
+    """`""` is an absence, not a claim, and must not beat the fallback.
+
+    Six shipped agents report `fail("", "internal", ...)` from their top-level
+    catch-all — the line the template shipped and everyone copied. Because the
+    key was present, `.get(key, default)` returned `""` and the caller lost the
+    one fact they were certain of: which capability they had called.
+    """
+    envelope = _envelope(ok=False, capability="", error={"type": "internal", "message": "boom"})
+    assert CallResult.decode(envelope, capability="grade_photos").capability == "grade_photos"
+
+
+def test_a_capability_the_agent_does_name_is_kept():
+    envelope = _envelope(
+        ok=False, capability="something_else", error={"type": "internal", "message": "x"}
+    )
+    assert CallResult.decode(envelope, capability="grade_photos").capability == "something_else"

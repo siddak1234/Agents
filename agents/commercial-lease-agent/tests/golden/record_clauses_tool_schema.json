@@ -1,0 +1,45 @@
+{
+  "name": "record_clauses",
+  "description": "Record every renewal, financial, or maintenance clause found in this excerpt.",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "clauses"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "clauses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "clause_type",
+            "text_quote",
+            "page_number",
+            "confidence_score"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "clause_type": {
+              "type": "string",
+              "enum": [
+                "renewal",
+                "financial",
+                "maintenance"
+              ]
+            },
+            "text_quote": {
+              "type": "string"
+            },
+            "page_number": {
+              "type": "integer"
+            },
+            "confidence_score": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  }
+}

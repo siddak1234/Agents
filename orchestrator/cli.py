@@ -222,6 +222,21 @@ def _cmd_scope(root: Path, args: argparse.Namespace) -> int:
             f"them. Say what you need in yours instead.",
             file=sys.stderr,
         )
+        # Two contributors in a row changed shared code to fix a bug that was
+        # already fixed on main, having branched before the fix landed. The
+        # message above tells them to put the file back; on a stale branch that
+        # reads as losing the fix, because from where they are standing it is
+        # the only copy. Naming the distance is what makes "put it back" and
+        # "you keep the fix" the same sentence.
+        behind = _commits_behind(root, args.base)
+        if behind:
+            print(
+                f"\nnote: your branch is {behind} commit(s) behind {args.base}. "
+                f"If you changed shared code to fix something, check whether it "
+                f"is already fixed there — rebasing may leave you with nothing "
+                f"to put back.",
+                file=sys.stderr,
+            )
         return 1
 
     scoped = ", ".join(touched_agents) if touched_agents else "no agent folder"
@@ -252,6 +267,29 @@ def _changed_paths(root: Path, base: str) -> list[str]:
     if completed.returncode != 0:
         raise _ScopeUnavailableError(f"cannot diff against {base!r}: {completed.stderr.strip()}")
     return [line for line in completed.stdout.splitlines() if line]
+
+
+def _commits_behind(root: Path, base: str) -> int | None:
+    """How many commits `base` has that HEAD does not, or None if unknowable.
+
+    Never raises. This decorates a failure that has already been decided, so a
+    shallow clone or a missing ref must cost the caller a line of advice, not
+    an error — the same reasoning that makes `_changed_paths` unavailability a
+    skip rather than a violation.
+    """
+    completed = subprocess.run(  # noqa: S603 — argv is fixed; `base` is a ref name
+        ["git", "rev-list", "--count", f"HEAD..{base}"],  # noqa: S607
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    try:
+        return int(completed.stdout.strip())
+    except ValueError:
+        return None
 
 
 def _cmd_list(registry: Registry, args: argparse.Namespace) -> int:
@@ -388,27 +426,50 @@ def _cmd_check(registry: Registry, args: argparse.Namespace) -> int:
 
     failed = 0
     for manifest in selected:
-        result = describe(manifest)
-        if not result.ok:
+        problem = _check_problem(manifest)
+        if problem:
             failed += 1
-            detail = result.error.message if result.error else "unknown failure"
-            print(f"FAIL  {manifest.name}\n      {detail}", file=sys.stderr)
-            continue
-
-        # The agent ran — but does it offer what it advertises? Printing the
-        # manifest's list here would restate the file we just read and prove
-        # nothing. Comparing it against what the agent reported is the whole
-        # point of a handshake: a capability declared and not implemented is a
-        # caller's runtime error, and one implemented and not declared is
-        # outside the contract.
-        drift = _describe_drift(manifest, result.output)
-        if drift:
-            failed += 1
-            print(f"FAIL  {manifest.name}\n      {drift}", file=sys.stderr)
+            print(f"FAIL  {manifest.name}\n      {problem}", file=sys.stderr)
             continue
 
         print(f"ok    {manifest.name}  ({', '.join(manifest.capability_names)})")
     return 1 if failed else 0
+
+
+def _check_problem(manifest: AgentManifest) -> str | None:
+    """Everything `agents check` asks of one agent, or None if it passes.
+
+    `agents check` and `agents verify`'s check gate ran two copies of this,
+    and a check added to one silently did not exist in the other — `verify`
+    printed `ok  agents check` on a tree where `agents check` exited 1. That
+    is the same green-locally/red-in-CI split `test_verify.py` exists to
+    prevent, so there is one implementation and both call it.
+    """
+    result = describe(manifest)
+    if not result.ok:
+        return result.error.message if result.error else "unknown failure"
+
+    # The agent ran — but does it offer what it advertises? Printing the
+    # manifest's list here would restate the file we just read and prove
+    # nothing. Comparing it against what the agent reported is the whole
+    # point of a handshake: a capability declared and not implemented is a
+    # caller's runtime error, and one implemented and not declared is
+    # outside the contract.
+    if drift := _describe_drift(manifest, result.output):
+        return drift
+
+    # A field the contract removed still decodes, so nothing at runtime
+    # complains — the agent just reports having called no model. That is
+    # a wrong claim arriving quietly, which is what a gate is for.
+    if result.stale_usage:
+        fields = ", ".join(f"usage.{f}" for f in result.stale_usage)
+        return (
+            f"emits {fields}, which the contract removed — the envelope decodes as "
+            f"`model: null`, silently claiming no model was called.\n"
+            f"      Report `usage.model` instead; see docs/AGENT_PROTOCOL.md."
+        )
+
+    return None
 
 
 def _cmd_test(registry: Registry, args: argparse.Namespace) -> int:
@@ -642,13 +703,13 @@ def _verify_strict(registry: Registry, args: argparse.Namespace) -> tuple[str, s
 
 
 def _verify_check(registry: Registry, args: argparse.Namespace) -> tuple[str, str]:
-    failures = []
-    for manifest in _verify_scope(registry, args):
-        result = describe(manifest)
-        if not result.ok:
-            failures.append(f"{manifest.name}: {result.error.message if result.error else '?'}")
-        elif drift := _describe_drift(manifest, result.output):
-            failures.append(f"{manifest.name}: {drift}")
+    """The same gate `agents check` runs — deliberately the same code, see
+    `_check_problem`."""
+    failures = [
+        f"{manifest.name}: {problem}"
+        for manifest in _verify_scope(registry, args)
+        if (problem := _check_problem(manifest))
+    ]
     return ("FAIL", "\n".join(failures)) if failures else ("ok", "")
 
 

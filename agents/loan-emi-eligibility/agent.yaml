@@ -1,0 +1,83 @@
+protocol: agentcall/v1
+name: loan-emi-eligibility
+description: >-
+  Computes loan EMI and checks a borrower's eligibility against a lender's
+  FOIR (Fixed Obligation to Income Ratio) policy table. Called by loan
+  origination or underwriting systems that need a standardized eligibility
+  decision and the maximum loan amount a borrower qualifies for, without
+  hand-coding FOIR bands per applicant tier. It does not make a lending
+  decision or check creditworthiness (CIBIL/credit score) — it only applies
+  the FOIR arithmetic.
+
+runtime:
+  type: subprocess
+  command: ["python3", "agent_main.py"]
+  test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["python3", "-m", "compileall", "-q", "."]
+  env:
+    inherit: []
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities: { type: array, items: { type: object } }
+
+  - name: calculate_emi
+    description: >-
+      Compute the monthly EMI, total payment, and total interest for a loan
+      given principal, annual interest rate, and tenure in months.
+    input_schema:
+      type: object
+      required: [principal, annual_rate_percent, tenure_months]
+      properties:
+        principal: { type: number, description: "Loan amount in INR, must be > 0" }
+        annual_rate_percent: { type: number, description: "Annual interest rate as a percentage, must be > 0" }
+        tenure_months: { type: integer, description: "Loan tenure in months, must be > 0" }
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [emi, total_payment, total_interest]
+      properties:
+        emi: { type: number }
+        total_payment: { type: number }
+        total_interest: { type: number }
+
+  - name: check_eligibility
+    description: >-
+      Check whether a requested loan's EMI fits within the applicant's FOIR
+      limit for their tier, and return the maximum principal they would
+      qualify for at the given rate and tenure.
+    input_schema:
+      type: object
+      required: [monthly_income, existing_emis, requested_principal, annual_rate_percent, tenure_months]
+      properties:
+        monthly_income: { type: number, description: "Applicant's gross monthly income in INR, must be > 0" }
+        existing_emis: { type: number, description: "Sum of applicant's existing monthly EMI obligations in INR, must be >= 0" }
+        requested_principal: { type: number, description: "Requested loan amount in INR, must be > 0" }
+        annual_rate_percent: { type: number, description: "Annual interest rate as a percentage, must be > 0" }
+        tenure_months: { type: integer, description: "Requested loan tenure in months, must be > 0" }
+        applicant_tier:
+          type: string
+          description: "One of standard, salaried_premium, self_employed. Defaults to standard."
+          enum: [standard, salaried_premium, self_employed]
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [eligible, emi, foir_percent, foir_limit_percent, max_eligible_principal, reason]
+      properties:
+        eligible: { type: boolean }
+        emi: { type: number }
+        foir_percent: { type: number }
+        foir_limit_percent: { type: number }
+        max_eligible_principal: { type: number }
+        reason: { type: string }
