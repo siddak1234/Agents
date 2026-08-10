@@ -21,3 +21,4 @@ agents:
   - path: agents/operations-maintenance-agent
   - path: agents/investment-due-diligence
   - path: agents/commercial-lease-agent
+  - path: agents/loan-emi-eligibility
