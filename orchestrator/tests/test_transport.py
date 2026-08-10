@@ -27,6 +27,8 @@ from orchestrator.discovery import DiscoveryError, load_registry, unregistered_a
 from orchestrator.manifest import AgentEnv, ManifestError
 from orchestrator.runner import BASE_ENV, build_env, call, describe
 
+PYTHON_EXE = Path(sys.executable).as_posix()
+
 STUB = """
 import json, os, sys, time
 P = "agentcall/v1"
@@ -102,9 +104,15 @@ def stub(tmp_path: Path):
             description: Stub agent for transport tests.
             runtime:
               type: subprocess
+<<<<<<< HEAD
+              command: ["{PYTHON_EXE}", "agent_main.py"]
+              test: ["{PYTHON_EXE}", "-c", "pass"]
+              lint: ["{PYTHON_EXE}", "-c", "pass"]
+=======
               command: ["{EXE}", "agent_main.py"]
               test: ["{EXE}", "-c", "pass"]
               lint: ["{EXE}", "-c", "pass"]
+>>>>>>> upstream/main
               env:
                 inherit: [STUB_ALLOWED, STUB_PREFIXED_*]
             capabilities:
@@ -358,7 +366,13 @@ def test_agents_lint_runs_the_declared_command(stub, capsys):
 def test_an_agent_declaring_no_lint_command_fails(stub, capsys):
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
+<<<<<<< HEAD
+        manifest.read_text(encoding="utf-8").replace(
+            f'  lint: ["{PYTHON_EXE}", "-c", "pass"]\n', ""
+        ),
+=======
         manifest.read_text(encoding="utf-8").replace(f'  lint: ["{EXE}", "-c", "pass"]\n', ""),
+>>>>>>> upstream/main
         encoding="utf-8",
     )
     assert main(["--root", str(stub.workdir.parent), "lint"]) == 1
@@ -369,7 +383,13 @@ def test_an_agent_declaring_no_test_command_fails(stub, capsys):
     """Tests nothing can run are tests nobody runs."""
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
+<<<<<<< HEAD
+        manifest.read_text(encoding="utf-8").replace(
+            f'  test: ["{PYTHON_EXE}", "-c", "pass"]\n', ""
+        ),
+=======
         manifest.read_text(encoding="utf-8").replace(f'  test: ["{EXE}", "-c", "pass"]\n', ""),
+>>>>>>> upstream/main
         encoding="utf-8",
     )
     assert main(["--root", str(stub.workdir.parent), "test"]) == 1
@@ -397,8 +417,13 @@ def test_the_test_command_gets_the_same_environment_a_call_gets(stub, monkeypatc
     manifest = stub.workdir / "agent.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
+<<<<<<< HEAD
+            f'  test: ["{PYTHON_EXE}", "-c", "pass"]',
+            f'  test: ["{PYTHON_EXE}", "probe.py"]',
+=======
             f'  test: ["{EXE}", "-c", "pass"]',
             f'  test: ["{EXE}", "probe.py"]',
+>>>>>>> upstream/main
         ),
         encoding="utf-8",
     )

@@ -39,6 +39,8 @@ TEMPLATE_SRC = Path(__file__).resolve().parents[2] / TEMPLATE_DIR
 
 #: Read from the template so an edit there cannot silently invalidate the
 #: description-similarity tests below.
+<<<<<<< HEAD
+=======
 #:
 #: `encoding` is explicit because `read_text()` otherwise uses the machine's
 #: default, and the template description contains an em dash: under a non-UTF-8
@@ -47,6 +49,7 @@ TEMPLATE_SRC = Path(__file__).resolve().parents[2] / TEMPLATE_DIR
 #: `_too_close_to`, so the padded-template test passes while testing nothing.
 #: `orchestrator.manifest` has always read the same file with `encoding="utf-8"`;
 #: this line was the one that disagreed.
+>>>>>>> upstream/main
 TEMPLATE_DESCRIPTION: str = yaml.safe_load(
     (TEMPLATE_SRC / "agent.yaml").read_text(encoding="utf-8")
 )["description"]

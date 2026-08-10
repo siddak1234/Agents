@@ -1,0 +1,142 @@
+protocol: agentcall/v1
+name: patient-appointment-agent
+description: >-
+  Automates the full lifecycle of healthcare appointment scheduling so patients
+  can check physician availability, book a consultation, and cancel bookings
+  without calling the clinic. It also understands free-form natural language
+  requests and translates them into structured scheduling actions, but it does
+  not store personal health records or provide medical advice.
+
+runtime:
+  type: subprocess
+  command: ["python3", "agent_main.py"]
+  test: ["python3", "-m", "unittest", "discover", "-s", "tests"]
+  lint: ["python3", "-m", "compileall", "-q", "."]
+  env:
+    inherit:
+      - ANTHROPIC_API_KEY
+      - ANTHROPIC_MODEL_CHAT
+
+capabilities:
+  - name: describe
+    description: Report this agent's name and capabilities. Costs nothing.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [name, protocol, capabilities]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name: { type: string }
+              description: { type: string }
+
+  - name: list_slots
+    description: >-
+      Return open appointment slots for the next seven days, filtered by
+      medical specialty (e.g. "Cardiology"), physician name, or calendar date
+      in YYYY-MM-DD format. Returns an empty list when no slots match.
+    input_schema:
+      type: object
+      properties:
+        specialty:  { type: string, description: "Clinical specialty to filter by, e.g. Cardiology" }
+        doctor_name: { type: string, description: "Partial or full physician name to filter by" }
+        date:       { type: string, description: "Calendar date in YYYY-MM-DD format" }
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [slots]
+      properties:
+        slots:
+          type: array
+          items:
+            type: object
+            required: [slot_id, doctor_name, specialty, date, time]
+            properties:
+              slot_id:     { type: string }
+              doctor_id:   { type: string }
+              doctor_name: { type: string }
+              specialty:   { type: string }
+              date:        { type: string }
+              time:        { type: string }
+
+  - name: book_appointment
+    description: >-
+      Reserve a specific slot for a named patient. Returns the appointment ID
+      and confirmation details. Fails with invalid_request if the slot is
+      already taken or does not exist.
+    input_schema:
+      type: object
+      required: [slot_id, patient_name, patient_phone]
+      properties:
+        slot_id:      { type: string, description: "Slot ID from list_slots" }
+        patient_name: { type: string, description: "Full name of the patient" }
+        patient_phone: { type: string, description: "Contact phone number" }
+        reason:       { type: string, description: "Optional reason or symptoms" }
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [appointment_id, status, doctor_name, date, time, patient_name]
+      properties:
+        appointment_id: { type: string }
+        status:         { type: string }
+        doctor_name:    { type: string }
+        date:           { type: string }
+        time:           { type: string }
+        patient_name:   { type: string }
+
+  - name: cancel_appointment
+    description: >-
+      Cancel a previously confirmed appointment by its appointment ID. The
+      released slot becomes available again for other patients to book.
+    input_schema:
+      type: object
+      required: [appointment_id]
+      properties:
+        appointment_id: { type: string, description: "ID returned by book_appointment" }
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [appointment_id, status]
+      properties:
+        appointment_id: { type: string }
+        status:         { type: string }
+
+  - name: chat
+    description: >-
+      Accept a free-form patient message and return a professional response
+      plus a structured suggested_action that a caller can use to immediately
+      invoke list_slots or book_appointment. Requires ANTHROPIC_API_KEY;
+      returns unavailable when the key is absent.
+    input_schema:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: "The patient's natural-language message"
+        chat_history:
+          type: array
+          description: "Prior turns for multi-turn conversations"
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role:    { type: string }
+              content: { type: string }
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [response, suggested_action]
+      properties:
+        response:              { type: string }
+        suggested_action:      { type: string }
+        suggested_action_input: { type: [object, "null"] }

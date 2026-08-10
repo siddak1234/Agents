@@ -55,6 +55,9 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 
 | Agent | Status | Capabilities |
 |---|---|---|
+<<<<<<< HEAD
+| [`patient-appointment-agent`](./agents/patient-appointment-agent) | active | `list_slots`, `book_appointment`, `cancel_appointment`, `chat` |
+=======
 | [`realty-lead-gen`](./agents/realty-lead-gen) | active | `grade_photos` |
 | [`case-preparation-gap-detection`](./agents/case-preparation-gap-detection) | active | `review_case` |
 | [`phishing-incident-triage`](./agents/phishing-incident-triage) | active | `triage_email` |
@@ -62,6 +65,7 @@ insists on finding it there: `pyproject.toml`, `uv.lock`,
 | [`investment-due-diligence`](./agents/investment-due-diligence) | active | `property_intelligence`, `financial_analysis`, `location_infrastructure_analysis`, `risk_assessment`, `investment_recommendation` |
 | [`commercial-lease-agent`](./agents/commercial-lease-agent) | active | `describe`, `extract_clauses`, `calculate_deadline` |
 | [`loan-emi-eligibility`](./agents/loan-emi-eligibility) | active | `describe`, `calculate_emi`, `check_eligibility` |
+>>>>>>> upstream/main
 
 This table is maintained by hand (and by `agents new`, which adds a row).
 What keeps it honest is `agents list --strict`, which fails when a registered

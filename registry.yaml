@@ -15,6 +15,9 @@
 version: 2
 
 agents:
+<<<<<<< HEAD
+  - path: agents/patient-appointment-agent
+=======
   - path: agents/realty-lead-gen
   - path: agents/case-preparation-gap-detection
   - path: agents/phishing-incident-triage
@@ -22,3 +25,4 @@ agents:
   - path: agents/investment-due-diligence
   - path: agents/commercial-lease-agent
   - path: agents/loan-emi-eligibility
+>>>>>>> upstream/main
