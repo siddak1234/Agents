@@ -15,7 +15,9 @@ AGENT_PATH = Path(__file__).resolve().parent.parent / "agent_main.py"
 PROTOCOL = "agentcall/v1"
 
 
-def call(capability: str, input_payload: dict | None = None, protocol: str | None = PROTOCOL) -> dict:
+def call(
+    capability: str, input_payload: dict | None = None, protocol: str | None = PROTOCOL
+) -> dict:
     request = {
         "protocol": protocol,
         "capability": capability,
@@ -94,6 +96,58 @@ class TestCalculateEmi(unittest.TestCase):
         self.assertGreater(envelope["output"]["emi"], 8000)
         self.assertLess(envelope["output"]["emi"], 8600)
 
+    def test_absurd_tenure_is_invalid_request_not_internal_crash(self):
+        # A caller's units mistake (e.g. days instead of months) must not
+        # crash the process with an OverflowError reported as "internal" --
+        # it's a caller-side mistake and belongs under invalid_request.
+        envelope = call("calculate_emi", {
+            "principal": 100000,
+            "annual_rate_percent": 10,
+            "tenure_months": 100000,
+        })
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["type"], "invalid_request")
+
+    def test_total_payment_reconciles_with_rounded_emi(self):
+        # total_payment must equal emi * tenure_months exactly, using the
+        # *rounded* emi -- not a paisa off, so a caller checking the math
+        # against the response gets a consistent answer.
+        envelope = call("calculate_emi", {
+            "principal": 100000,
+            "annual_rate_percent": 12,
+            "tenure_months": 12,
+        })
+        out = envelope["output"]
+        self.assertEqual(out["total_payment"], round(out["emi"] * 12, 2))
+
+    def test_infinite_principal_is_invalid_request(self):
+        proc = subprocess.run(
+            [sys.executable, str(AGENT_PATH)],
+            input='{"protocol":"agentcall/v1","capability":"calculate_emi",'
+                  '"input":{"principal":Infinity,"annual_rate_percent":10,'
+                  '"tenure_months":12},"request_id":"","deadline_ms":5000}',
+            capture_output=True,
+            text=True,
+            cwd=AGENT_PATH.parent,
+        )
+        envelope = json.loads(proc.stdout)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["type"], "invalid_request")
+
+    def test_nan_annual_rate_is_invalid_request(self):
+        proc = subprocess.run(
+            [sys.executable, str(AGENT_PATH)],
+            input='{"protocol":"agentcall/v1","capability":"calculate_emi",'
+                  '"input":{"principal":100000,"annual_rate_percent":NaN,'
+                  '"tenure_months":12},"request_id":"","deadline_ms":5000}',
+            capture_output=True,
+            text=True,
+            cwd=AGENT_PATH.parent,
+        )
+        envelope = json.loads(proc.stdout)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["type"], "invalid_request")
+
 
 class TestCheckEligibility(unittest.TestCase):
     def test_eligible_case(self):
@@ -161,6 +215,58 @@ class TestCheckEligibility(unittest.TestCase):
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 
+    def test_existing_emis_alone_flips_eligibility(self):
+        # Same income/requested loan/rate/tenure; only existing_emis differs
+        # enough to cross the standard 50% FOIR line by itself. If
+        # existing_emis were ever dropped from the FOIR sum, both calls
+        # would report the same (incorrect) eligible value.
+        base = {
+            "monthly_income": 100000,
+            "requested_principal": 500000,
+            "annual_rate_percent": 10,
+            "tenure_months": 60,
+            "applicant_tier": "standard",
+        }
+        low_existing = call("check_eligibility", {**base, "existing_emis": 5000})
+        high_existing = call("check_eligibility", {**base, "existing_emis": 55000})
+
+        self.assertTrue(low_existing["ok"])
+        self.assertTrue(high_existing["ok"])
+        self.assertTrue(low_existing["output"]["eligible"])
+        self.assertFalse(high_existing["output"]["eligible"])
+
+        # Hard-coded, independently computed FOIR: emi for 500000 @ 10% / 60mo
+        # is 10623.51 (verified against the standard reducing-balance formula
+        # outside this codebase). FOIR = (existing + emi) / income * 100.
+        self.assertAlmostEqual(low_existing["output"]["foir_percent"], 15.62, places=1)
+        self.assertAlmostEqual(high_existing["output"]["foir_percent"], 65.62, places=1)
+
+    def test_applicant_tier_null_is_invalid_request_not_default(self):
+        # Explicit null must be rejected, not silently relaxed to "standard".
+        envelope = call("check_eligibility", {
+            "monthly_income": 60000,
+            "existing_emis": 0,
+            "requested_principal": 100000,
+            "annual_rate_percent": 10,
+            "tenure_months": 12,
+            "applicant_tier": None,
+        })
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["type"], "invalid_request")
+
+    def test_applicant_tier_omitted_defaults_to_standard(self):
+        # Contrast with the null case above: omitting the key is the only
+        # way to get the default.
+        envelope = call("check_eligibility", {
+            "monthly_income": 60000,
+            "existing_emis": 0,
+            "requested_principal": 100000,
+            "annual_rate_percent": 10,
+            "tenure_months": 12,
+        })
+        self.assertTrue(envelope["ok"])
+        self.assertEqual(envelope["output"]["foir_limit_percent"], 50.0)
+
 
 class TestProtocolLevelErrors(unittest.TestCase):
     def test_unknown_capability(self):
@@ -169,8 +275,8 @@ class TestProtocolLevelErrors(unittest.TestCase):
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 
     def test_wrong_protocol(self):
-        envelope = call("calculate_emi", {"principal": 1000, "annual_rate_percent": 10, "tenure_months": 6},
-                         protocol="not-agentcall/v0")
+        payload = {"principal": 1000, "annual_rate_percent": 10, "tenure_months": 6}
+        envelope = call("calculate_emi", payload, protocol="not-agentcall/v0")
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["type"], "invalid_request")
 

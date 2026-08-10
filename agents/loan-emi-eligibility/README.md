@@ -44,11 +44,13 @@ echo '{"protocol":"agentcall/v1","capability":"check_eligibility","input":{"mont
 
 ## Errors
 
-All failures this agent can return are `invalid_request` — every input is
-validated locally with no external dependency, so nothing here can be
-`unavailable`, and there's no long-running work that could `timeout`.
-Examples: a negative or zero principal, a non-numeric field, a missing
-required field, or an unrecognized `applicant_tier`.
+All expected failures are `invalid_request` — every input is validated
+locally against sane bounds (see `MAX_PRINCIPAL`, `MAX_ANNUAL_RATE_PERCENT`,
+`MAX_TENURE_MONTHS` in `loan_logic.py`), so nothing here calls an external
+service and nothing should be `unavailable` or `timeout`. Examples: a
+negative or zero principal, a non-finite (`Infinity`/`NaN`) value, an
+out-of-bounds value (e.g. a 100000-month tenure sent by a units mistake), a
+missing required field, or an unrecognized/`null` `applicant_tier`.
 
 ## Tests
 

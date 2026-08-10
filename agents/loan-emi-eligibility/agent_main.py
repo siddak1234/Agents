@@ -96,7 +96,16 @@ def _handle_calculate_emi(payload: dict[str, Any]) -> dict[str, Any]:
 def _handle_check_eligibility(payload: dict[str, Any]) -> dict[str, Any]:
     import loan_logic
 
-    tier = payload.get("applicant_tier", loan_logic.DEFAULT_TIER)
+    # Default to "standard" only when the key is absent. If the caller sent
+    # applicant_tier explicitly -- including null -- that must be validated
+    # as-is and rejected if it isn't a real tier, not silently relaxed to
+    # the default tier. loan_logic.check_eligibility no longer coerces
+    # invalid values itself, so this is the only place the default applies.
+    if "applicant_tier" in payload:
+        tier = payload["applicant_tier"]
+    else:
+        tier = loan_logic.DEFAULT_TIER
+
     try:
         result = loan_logic.check_eligibility(
             monthly_income=payload.get("monthly_income"),
